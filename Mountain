@@ -434,29 +434,29 @@ local CoordTab  = Window:NewTab("จัดการพิกัด")
 -- ==========================================
 -- [[ MOVEMENT OPERATIONS / เมนูการเคลื่อนที่ ]] --
 -- ==========================================
-local MoveSec = MoveTab:NewSection("การควบคุมตัวละคร")
+-- local MoveSec = MoveTab:NewSection("การควบคุมตัวละคร")
 
-MoveSec:NewToggle("โหมดความเร็ว (Speed)", "เร่งความเร็วการเดินในแนวระนาบ CFrame", function(v)
-    States.SpeedEnabled = v
-end)
+-- MoveSec:NewToggle("โหมดความเร็ว (Speed)", "เร่งความเร็วการเดินในแนวระนาบ CFrame", function(v)
+--     States.SpeedEnabled = v
+-- end)
 
-MoveSec:NewSlider("ระดับความเร็วการเดิน", "ปรับระดับความเร็วการเคลื่อนที่", 250, 16, function(v)
-    States.SpeedValue = v
-end)
+-- MoveSec:NewSlider("ระดับความเร็วการเดิน", "ปรับระดับความเร็วการเคลื่อนที่", 250, 16, function(v)
+--     States.SpeedValue = v
+-- end)
 
-MoveSec:NewToggle("โหมดบิน (Fly Mode)", "บินได้อย่างอิสระบนอากาศทุกทิศทาง", function(v)
-    States.FlyEnabled = v
-    local hum = GetHumanoid()
-    if not v and hum then hum.PlatformStand = false end
-end)
+-- MoveSec:NewToggle("โหมดบิน (Fly Mode)", "บินได้อย่างอิสระบนอากาศทุกทิศทาง", function(v)
+--     States.FlyEnabled = v
+--     local hum = GetHumanoid()
+--     if not v and hum then hum.PlatformStand = false end
+-- end)
 
-MoveSec:NewSlider("ระดับความเร็วการบิน", "ปรับระดับความเร็วในการบิน", 250, 10, function(v)
-    States.FlySpeed = v
-end)
+-- MoveSec:NewSlider("ระดับความเร็วการบิน", "ปรับระดับความเร็วในการบิน", 250, 10, function(v)
+--     States.FlySpeed = v
+-- end)
 
-MoveSec:NewToggle("เดินทะลุสิ่งกีดขวาง (Noclip)", "ปิดแรงปะทะของร่างกายทำให้เดินทะลุบล็อกได้", function(v)
-    States.NoclipEnabled = v
-end)
+-- MoveSec:NewToggle("เดินทะลุสิ่งกีดขวาง (Noclip)", "ปิดแรงปะทะของร่างกายทำให้เดินทะลุบล็อกได้", function(v)
+--     States.NoclipEnabled = v
+-- end)
 
 -- ==========================================
 -- [[ AUTOMATION OPERATIONS / เมนูระบบอัตโนมัติ ]] --

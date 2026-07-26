@@ -921,4 +921,4 @@ end)
 --             if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
 --         end
 --     end
--- end)ก
+-- end)

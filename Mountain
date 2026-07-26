@@ -852,37 +852,37 @@ task.spawn(function()
 end)
 
 -- ลูปควบคุมฟิสิกส์และการเดิน/บิน (Heartbeat)
-RunService.Heartbeat:Connect(function(deltaTime)
-    local root = GetRoot()
-    local hum = GetHumanoid()
-    if not root or not hum then return end
+-- RunService.Heartbeat:Connect(function(deltaTime)
+--     local root = GetRoot()
+--     local hum = GetHumanoid()
+--     if not root or not hum then return end
 
-    if States.NoclipEnabled and LP.Character then
-        for _, descendant in ipairs(LP.Character:GetChildren()) do
-            if descendant:IsA("BasePart") then descendant.CanCollide = false end
-        end
-    end
+--     if States.NoclipEnabled and LP.Character then
+--         for _, descendant in ipairs(LP.Character:GetChildren()) do
+--             if descendant:IsA("BasePart") then descendant.CanCollide = false end
+--         end
+--     end
 
-    if States.FlyEnabled then
-        hum.PlatformStand = true
-        local flyDirection = Vector3.new(0, 0, 0)
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
-        if flyDirection.Magnitude > 0 then root.Velocity = flyDirection.Unit * States.FlySpeed else root.Velocity = Vector3.new(0, 0, 0) end
-    else
-        if hum.PlatformStand then hum.PlatformStand = false end
-        if States.SpeedEnabled then
-            local moveDirection = Vector3.new(0, 0, 0)
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
-            moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
-            if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
-        end
-    end
-end)
+--     if States.FlyEnabled then
+--         hum.PlatformStand = true
+--         local flyDirection = Vector3.new(0, 0, 0)
+--         if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
+--         if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
+--         if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
+--         if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
+--         if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
+--         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
+--         if flyDirection.Magnitude > 0 then root.Velocity = flyDirection.Unit * States.FlySpeed else root.Velocity = Vector3.new(0, 0, 0) end
+--     else
+--         if hum.PlatformStand then hum.PlatformStand = false end
+--         if States.SpeedEnabled then
+--             local moveDirection = Vector3.new(0, 0, 0)
+--             if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
+--             if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
+--             if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
+--             if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
+--             moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
+--             if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
+--         end
+--     end
+-- end)

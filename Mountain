@@ -19,8 +19,13 @@ local UpgradeBuy = RemotesFolder and RemotesFolder:WaitForChild("UpgradeBuy", 2)
 
 local ThingsFolder = Workspace:WaitForChild("Things", 3)
 local CrystalsFolder = ThingsFolder and ThingsFolder:FindFirstChild("Crystals") or Workspace:FindFirstChild("Crystals")
-local BouldersFolder = ThingsFolder and ThingsFolder:FindFirstChild("Boulders") or Workspace:FindFirstChild("Boulders")
-local RunesFolder    = ThingsFolder and ThingsFolder:FindFirstChild("Runes") or Workspace:FindFirstChild("Runes")
+-- local BouldersFolder = ThingsFolder and ThingsFolder:FindFirstChild("Boulders") or Workspace:FindFirstChild("Boulders")
+-- local RunesFolder    = ThingsFolder and ThingsFolder:FindFirstChild("Runes") or Workspace:FindFirstChild("Runes")
+
+local Mountain = Workspace:WaitForChild("MountainDecoration")
+
+local BouldersFolder = Mountain:WaitForChild("Boulders")
+local RunesFolder = Mountain:WaitForChild("Runes")
 
 -- ฟังชั่นติดตามโฟลเดอร์ในแมพในกรณีที่โหลดทีหลัง
 if ThingsFolder then
@@ -330,16 +335,22 @@ end
 
 local function CreateRuneESP(rune)
     if Rune_ESP_Cache[rune] then return end
-    
+
     local hl = Instance.new("Highlight")
-    hl.Name = "RuneHighlight_ESP"
-    hl.FillColor = Color3.fromRGB(0, 230, 255) -- ไฮไลต์สีฟ้าสว่าง
-    hl.FillTransparency = 0.4
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.Name = "RuneHighlight"
+
+    hl.FillColor = Color3.fromRGB(0,255,255)
+    hl.OutlineColor = Color3.fromRGB(255,255,255)
+
+    hl.FillTransparency = 0.2
+    hl.OutlineTransparency = 0
+
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+
     hl.Adornee = rune
-    hl.Enabled = RuneState.RuneESP
+    hl.Enabled = States.RuneESP
     hl.Parent = rune
-    
+
     Rune_ESP_Cache[rune] = hl
 end
 
@@ -431,6 +442,47 @@ local AutoTab   = Window:NewTab("ระบบอัตโนมัติ")
 local ScanTab   = Window:NewTab("การมองเห็น & ESP")
 local CoordTab  = Window:NewTab("จัดการพิกัด")
 local Boulders  = Window:NewTab("รูน")
+
+-- ==========================================
+-- [[ MOVEMENT OPERATIONS / รูน ]] --
+-- ==========================================
+
+local RuneSec = Boulders:NewSection("ระบบ Rune")
+
+RuneSec:NewToggle("ESP Rune", "มองเห็น Rune ทั้งหมด", function(v)
+    States.RuneESP = v
+
+    for _,hl in pairs(Rune_ESP_Cache) do
+        if hl then
+            hl.Enabled = v
+        end
+    end
+end)
+
+RuneSec:NewToggle("Auto Rune", "ฟาร์ม Rune อัตโนมัติ", function(v)
+    States.AutoRune = v
+
+    if not v then
+        States.CurrentRune = nil
+    end
+end)
+
+RuneSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "Teleport", function()
+
+    local rune = GetNearestRune()
+    local root = GetRoot()
+
+    if rune and root then
+        local part = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
+
+        if part then
+            root.CFrame = CFrame.new(part.Position + Vector3.new(0,2,0))
+        end
+    end
+
+end)
+
+RuneSec:NewLabel("จำนวน Rune : 0")
 
 -- ==========================================
 -- [[ MOVEMENT OPERATIONS / เมนูการเคลื่อนที่ ]] --
@@ -868,4 +920,4 @@ end)
 --             if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
 --         end
 --     end
--- end)
+-- end)ก

@@ -1,3 +1,4 @@
+-- Reviewed by ChatGPT
 -- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.3 (ภาษาไทย + Boulders & Runes) ]] --
 
 local Players = game:GetService("Players")

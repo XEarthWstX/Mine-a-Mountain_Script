@@ -1,4 +1,4 @@
--- [[ Daley Hub - Kavo Exploration & Utility Suite v2.4.0 (Fixed & Runes Included) ]] --
+-- [[ Daley Hub - Kavo Exploration & Utility Suite v2.6.0 (Nocturnite & Boulders Edition) ]] --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -10,7 +10,7 @@ local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
 -- ==========================================
--- [[ REMOTE & INSTANCE PATHS (SAFE SCAN) ]] --
+-- [[ REMOTE & INSTANCE PATHS (DEX MAPPED) ]] --
 -- ==========================================
 local RemotesFolder = ReplicatedStorage:WaitForChild("Remotes", 3)
 local DigRequest = RemotesFolder and RemotesFolder:WaitForChild("DigRequest", 2)
@@ -20,25 +20,29 @@ local UpgradeBuy = RemotesFolder and RemotesFolder:WaitForChild("UpgradeBuy", 2)
 local ThingsFolder = Workspace:WaitForChild("Things", 3)
 local CrystalsFolder = ThingsFolder and ThingsFolder:WaitForChild("Crystals", 2) or Workspace:FindFirstChild("Crystals")
 
--- ค้นหาโฟลเดอร์ Runes แบบปลอดภัย ป้องกันสคริปต์ค้าง (Non-blocking)
-local Mountain = Workspace:FindFirstChild("MountainDecoration")
-local RunesFolder = (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) 
-                 or Workspace:FindFirstChild("Runes") 
-                 or (Mountain and Mountain:FindFirstChild("Runes"))
+-- ล็อกพาธเจาะจง MountainDecorations -> Boulders จาก Dex
+local MountainDecorations = Workspace:FindFirstChild("MountainDecorations") or Workspace:FindFirstChild("MountainDecoration")
+local BouldersFolder = (MountainDecorations and MountainDecorations:FindFirstChild("Boulders")) 
+                    or Workspace:FindFirstChild("Boulders", true)
 
--- ดักจับการโหลดโฟลเดอร์ในแมพย้อนหลัง
-if ThingsFolder then
-    ThingsFolder.ChildAdded:Connect(function(child)
-        if child.Name == "Crystals" then CrystalsFolder = child
-        elseif child.Name == "Runes" then RunesFolder = child end
-    end)
+local function GetBouldersFolder()
+    if BouldersFolder and BouldersFolder.Parent then return BouldersFolder end
+    local m = Workspace:FindFirstChild("MountainDecorations") or Workspace:FindFirstChild("MountainDecoration")
+    if m then
+        local b = m:FindFirstChild("Boulders")
+        if b then BouldersFolder = b return b end
+    end
+    local b = Workspace:FindFirstChild("Boulders", true)
+    if b then BouldersFolder = b return b end
+    return nil
 end
+
+-- ดักจับการโหลดโฟลเดอร์ย้อนหลัง
 Workspace.ChildAdded:Connect(function(child)
-    if child.Name == "Runes" then RunesFolder = child
-    elseif child.Name == "MountainDecoration" then
-        Mountain = child
-        local r = child:FindFirstChild("Runes")
-        if r then RunesFolder = r end
+    if child.Name == "MountainDecorations" or child.Name == "MountainDecoration" then
+        MountainDecorations = child
+        local b = child:FindFirstChild("Boulders")
+        if b then BouldersFolder = b end
     end
 end)
 
@@ -56,7 +60,7 @@ local States = {
     -- Visuals / Scanner
     PlayerESP      = false,
     CrystalESP     = false,
-    RuneESP        = false,
+    BoulderESP     = false,
     SelectedPlayer = nil,
 
     -- Coordinates Storage
@@ -84,14 +88,14 @@ local States = {
     LockTimestamp    = 0,
     SkipCurrent      = false,
 
-    -- Rune Farming
-    AutoRune         = false,
-    CurrentRune      = nil
+    -- Boulders / Nocturnite Farming
+    AutoBoulder      = false,
+    CurrentBoulder   = nil
 }
 
 local Player_ESP_Cache = {}
 local Crystal_ESP_Cache = {}
-local Rune_ESP_Cache = {}
+local Boulder_ESP_Cache = {}
 local PermanentBlacklist = {}  
 local CrystalTargetStartTime = 0 
 
@@ -142,25 +146,40 @@ local function GetNearestCrystal()
     return closest
 end
 
-local function GetNearestRune()
-    local folder = RunesFolder or (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
-    if not folder and Mountain then folder = Mountain:FindFirstChild("Runes") end
-    if not folder then return nil end
-
+-- ฟังก์ชั่นค้นหา Nocturnite / Boulders ชิ้นที่ใกล้ที่สุด (รองรับการแตกย่อยระดับ Nocturnite_cell)
+local function GetNearestBoulder()
+    local folder = GetBouldersFolder()
     local myRoot = GetRoot()
-    if not myRoot then return nil end
+    if not myRoot or not folder then return nil end
 
     local closest = nil
     local shortestDistance = math.huge
 
-    for _, rune in ipairs(folder:GetChildren()) do
-        if rune and rune.Parent then
-            local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-            if targetPart then
-                local dist = (myRoot.Position - targetPart.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closest = rune
+    for _, child in ipairs(folder:GetChildren()) do
+        if child and child.Parent then
+            -- สแกนอ่านรายการชิ้นส่วนภายใน (เช่น Nocturnite -> Nocturnite_cell.001)
+            local itemsToEvaluate = {}
+            if child:IsA("Model") or child:IsA("Folder") then
+                local sub = child:GetChildren()
+                if #sub > 0 then
+                    for _, cell in ipairs(sub) do table.insert(itemsToEvaluate, cell) end
+                else
+                    table.insert(itemsToEvaluate, child)
+                end
+            else
+                table.insert(itemsToEvaluate, child)
+            end
+
+            for _, item in ipairs(itemsToEvaluate) do
+                if item and item.Parent and not PermanentBlacklist[item] then
+                    local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+                    if targetPart then
+                        local dist = (myRoot.Position - targetPart.Position).Magnitude
+                        if dist < shortestDistance then
+                            shortestDistance = dist
+                            closest = item
+                        end
+                    end
                 end
             end
         end
@@ -231,30 +250,30 @@ local function RemoveCrystalESP(crystal)
     end
 end
 
--- Rune Chams
-local function CreateRuneESP(rune)
-    if Rune_ESP_Cache[rune] then return end
+-- Boulder / Nocturnite Chams (สีส้ม)
+local function CreateBoulderESP(item)
+    if Boulder_ESP_Cache[item] then return end
     
     local hl = Instance.new("Highlight")
-    hl.Name = "DaleyKavo_RuneHighlight"
-    hl.FillColor = Color3.fromRGB(0, 230, 255)
+    hl.Name = "DaleyKavo_BoulderHighlight"
+    hl.FillColor = Color3.fromRGB(255, 140, 0)
     hl.FillTransparency = 0.3
     hl.OutlineColor = Color3.fromRGB(255, 255, 255)
     hl.OutlineTransparency = 0
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Adornee = rune
-    hl.Enabled = States.RuneESP
-    hl.Parent = rune
+    hl.Adornee = item
+    hl.Enabled = States.BoulderESP
+    hl.Parent = item
     
-    Rune_ESP_Cache[rune] = hl
+    Boulder_ESP_Cache[item] = hl
 end
 
-local function RemoveRuneESP(rune)
-    if Rune_ESP_Cache[rune] then
+local function RemoveBoulderESP(item)
+    if Boulder_ESP_Cache[item] then
         pcall(function()
-            Rune_ESP_Cache[rune]:Destroy()
+            Boulder_ESP_Cache[item]:Destroy()
         end)
-        Rune_ESP_Cache[rune] = nil
+        Boulder_ESP_Cache[item] = nil
     end
 end
 
@@ -271,20 +290,28 @@ if CrystalsFolder then
     CrystalsFolder.ChildRemoved:Connect(RemoveCrystalESP)
 end
 
+-- ลูปสแกนสร้าง ESP สำหรับ Boulders / Nocturnite
 task.spawn(function()
     while true do
-        local folder = RunesFolder or (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
-        if not folder and Mountain then folder = Mountain:FindFirstChild("Runes") end
-
+        local folder = GetBouldersFolder()
         if folder then
-            for _, rune in ipairs(folder:GetChildren()) do
-                CreateRuneESP(rune)
+            local function registerItem(item)
+                CreateBoulderESP(item)
+                if item:IsA("Model") or item:IsA("Folder") then
+                    for _, cell in ipairs(item:GetChildren()) do
+                        CreateBoulderESP(cell)
+                    end
+                    item.ChildAdded:Connect(CreateBoulderESP)
+                end
             end
-            folder.ChildAdded:Connect(CreateRuneESP)
-            folder.ChildRemoved:Connect(RemoveRuneESP)
+
+            for _, child in ipairs(folder:GetChildren()) do
+                registerItem(child)
+            end
+            folder.ChildAdded:Connect(registerItem)
             break
         end
-        task.wait(1)
+        task.wait(2)
     end
 end)
 
@@ -294,11 +321,62 @@ end)
 local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 local Window = Kavo.CreateLib("Daley Hub - Utility Engine", "Midnight")
 
-local MoveTab   = Window:NewTab("Movement")
-local AutoTab   = Window:NewTab("Automation")
-local RuneTab   = Window:NewTab("รูน")
-local ScanTab   = Window:NewTab("Visuals & Scanner")
-local CoordTab  = Window:NewTab("Coordinates Manager")
+local MoveTab     = Window:NewTab("Movement")
+local AutoTab     = Window:NewTab("Automation")
+local BoulderTab  = Window:NewTab("รูน (Boulders)")
+local ScanTab     = Window:NewTab("Visuals & Scanner")
+local CoordTab    = Window:NewTab("Coordinates Manager")
+
+-- ==========================================
+-- [[ BOULDERS / NOCTURNITE OPERATIONS ]] --
+-- ==========================================
+local BoulderSec = BoulderTab:NewSection("ระบบฟาร์ม Boulders / Nocturnite")
+
+BoulderSec:NewButton("🔍 ตรวจเช็คก้อน Nocturnite", "นับจำนวนก้อน Nocturnite_cell ในแมพ", function()
+    local folder = GetBouldersFolder()
+    if folder then
+        local cellCount = 0
+        for _, model in ipairs(folder:GetChildren()) do
+            if model:IsA("Model") or model:IsA("Folder") then
+                cellCount = cellCount + #model:GetChildren()
+            else
+                cellCount = cellCount + 1
+            end
+        end
+        Kavo:Notify("ตรวจพบ Boulders!", "พบแร่ทั้งหมด " .. tostring(cellCount) .. " ก้อน/เซลล์", 5)
+        print("[Daley Hub] Boulders Folder: " .. folder:GetFullName() .. " | Cells: " .. tostring(cellCount))
+    else
+        Kavo:Notify("ไม่พบ Boulders", "ไม่พบโฟลเดอร์ Boulders ใน MountainDecorations", 5)
+    end
+end)
+
+BoulderSec:NewToggle("เปิด ESP มอง Boulders (Boulder ESP)", "แสดงไฮไลต์สีส้มมองทะลุก้อน Nocturnite ทุกก้อน", function(v)
+    States.BoulderESP = v
+    for _, hl in pairs(Boulder_ESP_Cache) do
+        if hl then hl.Enabled = v end
+    end
+end)
+
+BoulderSec:NewToggle("ออโต้ฟาร์ม Boulders (Auto Boulder)", "วาร์ปไปหา Nocturnite_cell ที่ใกล้ที่สุดและกดเก็บให้อัตโนมัติ", function(v)
+    States.AutoBoulder = v
+    if not v then
+        States.CurrentBoulder = nil
+    end
+end)
+
+BoulderSec:NewButton("วาร์ปไป Boulder ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Nocturnite_cell ที่ใกล้ที่สุดทันที", function()
+    local b = GetNearestBoulder()
+    local root = GetRoot()
+    if b and root then
+        local part = b:IsA("BasePart") and b or b:FindFirstChildWhichIsA("BasePart", true)
+        if part then
+            root.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
+            Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา " .. b.Name .. " เรียบร้อยแล้ว", 3)
+        end
+    else
+        Kavo:Notify("ข้อผิดพลาด", "ไม่พบ Boulders ในแมพขณะนี้!", 3)
+    end
+end)
 
 -- ==========================================
 -- [[ MOVEMENT OPERATIONS ]] --
@@ -378,62 +456,13 @@ end)
 -- Upgrades Interface
 local UpgradeSec = AutoTab:NewSection("Stat Upgrades")
 
-UpgradeSec:NewToggle("Auto Buy Air Tier 1", "Repeatedly purchases Air Level 1", function(v)
-    States.AutoAir1 = v
-end)
+UpgradeSec:NewToggle("Auto Buy Air Tier 1", "Repeatedly purchases Air Level 1", function(v) States.AutoAir1 = v end)
+UpgradeSec:NewToggle("Auto Buy Air Tier 2", "Repeatedly purchases Air Level 2", function(v) States.AutoAir2 = v end)
+UpgradeSec:NewToggle("Auto Buy Air Tier 3", "Repeatedly purchases Air Level 3", function(v) States.AutoAir3 = v end)
 
-UpgradeSec:NewToggle("Auto Buy Air Tier 2", "Repeatedly purchases Air Level 2", function(v)
-    States.AutoAir2 = v
-end)
-
-UpgradeSec:NewToggle("Auto Buy Air Tier 3", "Repeatedly purchases Air Level 3", function(v)
-    States.AutoAir3 = v
-end)
-
-UpgradeSec:NewToggle("Auto Buy Weight Tier 1", "Repeatedly purchases Weight Level 1", function(v)
-    States.AutoWeight1 = v
-end)
-
-UpgradeSec:NewToggle("Auto Buy Weight Tier 2", "Repeatedly purchases Weight Level 2", function(v)
-    States.AutoWeight2 = v
-end)
-
-UpgradeSec:NewToggle("Auto Buy Weight Tier 3", "Repeatedly purchases Weight Level 3", function(v)
-    States.AutoWeight3 = v
-end)
-
--- ==========================================
--- [[ RUNE OPERATIONS (หมวดหมู่ รูน) ]] --
--- ==========================================
-local RuneSec = RuneTab:NewSection("ระบบค้นหา & ฟาร์ม Rune")
-
-RuneSec:NewToggle("เปิด ESP มอง Rune (Rune ESP)", "แสดงกรอบไฮไลต์สีฟ้าใส Rune ทั้งหมดในแมพ", function(v)
-    States.RuneESP = v
-    for _, hl in pairs(Rune_ESP_Cache) do
-        if hl then hl.Enabled = v end
-    end
-end)
-
-RuneSec:NewToggle("ออโต้ฟาร์ม Rune (Auto Rune)", "วาร์ปไปหา Rune ที่ใกล้ที่สุดและทำการกดเก็บอัตโนมัติ", function(v)
-    States.AutoRune = v
-    if not v then
-        States.CurrentRune = nil
-    end
-end)
-
-RuneSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
-    local rune = GetNearestRune()
-    local root = GetRoot()
-    if rune and root then
-        local part = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            root.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
-            Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา Rune เรียบร้อยแล้ว", 3)
-        end
-    else
-        Kavo:Notify("ข้อผิดพลาด", "ไม่พบ Rune ในบริเวณนี้!", 3)
-    end
-end)
+UpgradeSec:NewToggle("Auto Buy Weight Tier 1", "Repeatedly purchases Weight Level 1", function(v) States.AutoWeight1 = v end)
+UpgradeSec:NewToggle("Auto Buy Weight Tier 2", "Repeatedly purchases Weight Level 2", function(v) States.AutoWeight2 = v end)
+UpgradeSec:NewToggle("Auto Buy Weight Tier 3", "Repeatedly purchases Weight Level 3", function(v) States.AutoWeight3 = v end)
 
 -- ==========================================
 -- [[ VISUALS & SCANNER OPERATIONS ]] --
@@ -510,7 +539,7 @@ end)
 -- [[ DAEMON FRAME TRACKING LOOP CONNECTIONS ]] --
 -- ==========================================
 
--- Proximity Prompt Trigger Daemon (Crystals & Runes)
+-- Proximity Prompt Trigger Daemon (Crystals & Boulders)
 task.spawn(function()
     while true do
         if fireproximityprompt then
@@ -518,12 +547,14 @@ task.spawn(function()
                 local target = nil
                 if States.AutoCrystal and States.CurrentCrystal then
                     target = States.CurrentCrystal
-                elseif States.AutoRune and States.CurrentRune then
-                    target = States.CurrentRune
+                elseif States.AutoBoulder and States.CurrentBoulder then
+                    target = States.CurrentBoulder
                 end
 
                 if target then
-                    local prompt = target:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    local prompt = target:FindFirstChildOfClass("ProximityPrompt") 
+                                or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                or (target.Parent and target.Parent:FindFirstChildWhichIsA("ProximityPrompt", true))
                     if prompt then
                         fireproximityprompt(prompt)
                     end
@@ -617,21 +648,21 @@ task.spawn(function()
     end
 end)
 
--- Rune Target Tracking & CFrame Loop
+-- Boulder / Nocturnite Target Tracking & CFrame Loop
 task.spawn(function()
     while true do
-        if States.AutoRune then
+        if States.AutoBoulder then
             local myRoot = GetRoot()
             if myRoot then
-                local rValid = States.CurrentRune and States.CurrentRune.Parent and States.CurrentRune:IsDescendantOf(Workspace)
-                if not rValid then
-                    States.CurrentRune = GetNearestRune()
+                local bValid = States.CurrentBoulder and States.CurrentBoulder.Parent and States.CurrentBoulder:IsDescendantOf(Workspace)
+                if not bValid then
+                    States.CurrentBoulder = GetNearestBoulder()
                 end
 
-                if States.CurrentRune then
+                if States.CurrentBoulder then
                     pcall(function()
-                        local r = States.CurrentRune
-                        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
+                        local b = States.CurrentBoulder
+                        local targetPart = b:IsA("BasePart") and b or b:FindFirstChildWhichIsA("BasePart", true)
                         if targetPart then
                             myRoot.Velocity = Vector3.new(0, 0, 0)
                             myRoot.RotVelocity = Vector3.new(0, 0, 0)

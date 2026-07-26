@@ -430,6 +430,7 @@ local Window = Kavo.CreateLib("EarthWst - ระบบรองรับภา�
 local AutoTab   = Window:NewTab("ระบบอัตโนมัติ")
 local ScanTab   = Window:NewTab("การมองเห็น & ESP")
 local CoordTab  = Window:NewTab("จัดการพิกัด")
+local Boulders  = Window:NewTab("รูน")
 
 -- ==========================================
 -- [[ MOVEMENT OPERATIONS / เมนูการเคลื่อนที่ ]] --
@@ -523,10 +524,6 @@ SpecialSec:NewButton("วาร์ปไป Boulder ที่ใกล้ที�
     end
 end)
 
-SpecialSec:NewToggle("ออโต้ฟาร์ม Runes (รูน)", "วาร์ปไปหา Rune ที่ใกล้ที่สุดและทำการเก็บ/ขุดอัตโนมัติ", function(v)
-    States.AutoRune = v
-    if not v then States.CurrentRune = nil end
-end)
 
 SpecialSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
     local r = GetNearestRune()
@@ -565,23 +562,9 @@ ScanSec:NewToggle("เปิด ESP มองผู้เล่น (Player ESP)"
     end
 end)
 
-ScanSec:NewToggle("เปิด ESP มองคริสตัล (Crystal ESP)", "เปิดสีไฮไลต์คริสตัลทั้งหมดบนแผนที่ (สีม่วง)", function(v)
-    States.CrystalESP = v
-    for _, highlight in pairs(Crystal_ESP_Cache) do
-        if highlight then highlight.Enabled = v end
-    end
-end)
-
 ScanSec:NewToggle("เปิด ESP มองหิน Boulders (Boulder ESP)", "เปิดสีไฮไลต์หิน Boulders บนแผนที่ (สีส้ม)", function(v)
     States.BoulderESP = v
     for _, highlight in pairs(Boulder_ESP_Cache) do
-        if highlight then highlight.Enabled = v end
-    end
-end)
-
-ScanSec:NewToggle("เปิด ESP มองรูน Runes (Rune ESP)", "เปิดสีไฮไลต์รูน Runes บนแผนที่ (สีฟ้า)", function(v)
-    States.RuneESP = v
-    for _, highlight in pairs(Rune_ESP_Cache) do
         if highlight then highlight.Enabled = v end
     end
 end)

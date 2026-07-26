@@ -1,4 +1,4 @@
--- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.3 (ภาษาไทย + Boulders & Runes) ]] --
+-- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.3 (ภาษาไทย + Full Runes & Boulders Suite) ]] --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -67,26 +67,35 @@ local States = {
     AutoWeight2      = false,
     AutoWeight3      = false,
 
-    -- Crystal / Boulder / Rune Farming
+    -- Crystal Farming
     AutoCrystal      = false,
     CurrentCrystal   = nil,
     CrystalHoldTime  = 5,        
     LockTimestamp    = 0,
     SkipCurrent      = false,
 
+    -- Boulder Farming
     AutoBoulder      = false,
     CurrentBoulder   = nil,
 
+    -- Rune Farming Advanced Suite
     AutoRune         = false,
-    CurrentRune      = nil
+    CurrentRune      = nil,
+    RuneHoldTime     = 3,
+    RuneLockTimestamp= 0,
+    SkipRuneCurrent  = false
 }
 
 local Player_ESP_Cache  = {}
 local Crystal_ESP_Cache = {}
 local Boulder_ESP_Cache = {}
 local Rune_ESP_Cache    = {}
-local PermanentBlacklist = {}  
+
+local PermanentBlacklist     = {}  
+local RunePermanentBlacklist = {}  
+
 local CrystalTargetStartTime = 0 
+local RuneTargetStartTime    = 0
 
 -- ==========================================
 -- [[ UTILITY FUNCTIONS / ฟังก์ชั่นช่วยเหลือ ]] --
@@ -112,16 +121,17 @@ local function GetOtherPlayers()
     return names
 end
 
-local function GetNearestObjectFromFolder(folder)
+local function GetNearestObjectFromFolder(folder, blacklist)
     if not folder then return nil end
     local myRoot = GetRoot()
     if not myRoot then return nil end
 
     local closest = nil
     local shortestDistance = math.huge
+    local bl = blacklist or PermanentBlacklist
 
     for _, item in ipairs(folder:GetChildren()) do
-        if item and item.Parent and not PermanentBlacklist[item] then
+        if item and item.Parent and not bl[item] then
             local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
             if targetPart then
                 local dist = (myRoot.Position - targetPart.Position).Magnitude
@@ -136,15 +146,15 @@ local function GetNearestObjectFromFolder(folder)
 end
 
 local function GetNearestCrystal()
-    return GetNearestObjectFromFolder(CrystalsFolder)
+    return GetNearestObjectFromFolder(CrystalsFolder, PermanentBlacklist)
 end
 
 local function GetNearestBoulder()
-    return GetNearestObjectFromFolder(BouldersFolder)
+    return GetNearestObjectFromFolder(BouldersFolder, PermanentBlacklist)
 end
 
 local function GetNearestRune()
-    return GetNearestObjectFromFolder(RunesFolder)
+    return GetNearestObjectFromFolder(RunesFolder, RunePermanentBlacklist)
 end
 
 -- ==========================================
@@ -245,186 +255,11 @@ BindFolderESP(function() return CrystalsFolder end, CreateCrystalESP, RemoveCrys
 BindFolderESP(function() return BouldersFolder end, CreateBoulderESP, RemoveBoulderESP)
 BindFolderESP(function() return RunesFolder end, CreateRuneESP, RemoveRuneESP)
 
-
--- ==========================================
--- [[ ระบบสแกนหาโฟลเดอร์ RUNES ]] --
--- ==========================================
-local Workspace = game:GetService("Workspace")
-local Players = game:GetService("Players")
-local LP = Players.LocalPlayer
-
-local ThingsFolder = Workspace:FindFirstChild("Things")
-local RunesFolder  = (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
-
--- ดักจับกรณีที่โฟลเดอร์ Runes โหลดขึ้นมาทีหลัง
-if ThingsFolder then
-    ThingsFolder.ChildAdded:Connect(function(child)
-        if child.Name == "Runes" then
-            RunesFolder = child
-        end
-    end)
-end
-
--- ==========================================
--- [[ ตัวแปรสถานะ (STATES & CACHE) ]] --
--- ==========================================
-local RuneState = {
-    AutoRune = false,      -- เปิด/ปิด ออโต้ฟาร์ม Runes
-    RuneESP  = false,      -- เปิด/ปิด ESP มองทะลุ Runes
-    CurrentRune = nil
-}
-
-local Rune_ESP_Cache = {}
-
--- ==========================================
--- [[ ฟังก์ชั่นช่วยเหลือ (UTILITY FUNCTIONS) ]] --
--- ==========================================
-
--- หาตำแหน่งตัวละครของเรา
-local function GetMyRoot()
-    local char = LP.Character
-    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
-end
-
--- ค้นหา Rune ชิ้นที่อยู่ใกล้เราที่สุด
-local function GetNearestRune()
-    if not RunesFolder then return nil end
-    local myRoot = GetMyRoot()
-    if not myRoot then return nil end
-
-    local closestRune = nil
-    local shortestDistance = math.huge
-
-    for _, rune in ipairs(RunesFolder:GetChildren()) do
-        if rune and rune.Parent then
-            local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-            if targetPart then
-                local dist = (myRoot.Position - targetPart.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closestRune = rune
-                end
-            end
-        end
-    end
-    return closestRune
-end
-
--- ฟังก์ชั่นวาร์ปไปหา Rune ชิ้นที่ใกล้ที่สุด 1 ครั้ง
-local function TeleportToNearestRune()
-    local nearestRune = GetNearestRune()
-    local myRoot = GetMyRoot()
-    if nearestRune and myRoot then
-        local targetPart = nearestRune:IsA("BasePart") and nearestRune or nearestRune:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            return true
-        end
-    end
-    return false
-end
-
--- ==========================================
--- [[ ระบบ ESP ไฮไลต์สีฟ้ามองทะลุ RUNES ]] --
--- ==========================================
-
-local function CreateRuneESP(rune)
-    if Rune_ESP_Cache[rune] then return end
-    
-    local hl = Instance.new("Highlight")
-    hl.Name = "RuneHighlight_ESP"
-    hl.FillColor = Color3.fromRGB(0, 230, 255) -- ไฮไลต์สีฟ้าสว่าง
-    hl.FillTransparency = 0.4
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.Adornee = rune
-    hl.Enabled = RuneState.RuneESP
-    hl.Parent = rune
-    
-    Rune_ESP_Cache[rune] = hl
-end
-
-local function RemoveRuneESP(rune)
-    if Rune_ESP_Cache[rune] then
-        pcall(function() Rune_ESP_Cache[rune]:Destroy() end)
-        Rune_ESP_Cache[rune] = nil
-    end
-end
-
--- ฟังชั่นสลับ เปิด/ปิด ESP Runes ทั้งแมพ
-local function ToggleRuneESP(enabled)
-    RuneState.RuneESP = enabled
-    for _, hl in pairs(Rune_ESP_Cache) do
-        if hl then hl.Enabled = enabled end
-    end
-end
-
--- ผูกลูปสแกน ESP เข้ากับโฟลเดอร์ Runes
-task.spawn(function()
-    while true do
-        if RunesFolder then
-            for _, rune in ipairs(RunesFolder:GetChildren()) do
-                CreateRuneESP(rune)
-            end
-            RunesFolder.ChildAdded:Connect(CreateRuneESP)
-            RunesFolder.ChildRemoved:Connect(RemoveRuneESP)
-            break
-        end
-        task.wait(1)
-    end
-end)
-
--- ==========================================
--- [[ ลูปทำงานเบื้องหลัง (AUTO FARM & COLLECT) ]] --
--- ==========================================
-
--- 1. ลูปรอเปิด ProximityPrompt เพื่อเก็บ Rune อัตโนมัติ
-task.spawn(function()
-    while true do
-        if RuneState.AutoRune and RuneState.CurrentRune and fireproximityprompt then
-            pcall(function()
-                local prompt = RuneState.CurrentRune:FindFirstChildOfClass("ProximityPrompt") or RuneState.CurrentRune:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then
-                    fireproximityprompt(prompt)
-                end
-            end)
-        end
-        task.wait(0.1)
-    end
-end)
-
--- 2. ลูปวาร์ปล็อคตำแหน่งไปหา Rune ชิ้นที่ใกล้ที่สุด
-task.spawn(function()
-    while true do
-        if RuneState.AutoRune then
-            local myRoot = GetMyRoot()
-            if myRoot then
-                local isValid = RuneState.CurrentRune and RuneState.CurrentRune.Parent and RuneState.CurrentRune:IsDescendantOf(Workspace)
-                if not isValid then
-                    RuneState.CurrentRune = GetNearestRune()
-                end
-
-                if RuneState.CurrentRune then
-                    pcall(function()
-                        local rune = RuneState.CurrentRune
-                        local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart then
-                            myRoot.Velocity = Vector3.new(0, 0, 0)
-                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
-                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
-                        end
-                    end)
-                end
-            end
-        end
-        task.wait(0.05)
-    end
-end)
-
 -- ==========================================
 -- [[ KAVO LIBRARY CONFIGURATION / ตั้งค่า UI ]] --
 -- ==========================================
 local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Kavo.CreateLib("EarthWst - ระบบรองรับภาษาไทย", "Midnight")
+local Window = Kavo.CreateLib("Daley Hub - ระบบช่วยเหลือ v2.3.3", "Midnight")
 
 local MoveTab   = Window:NewTab("การเคลื่อนที่")
 local AutoTab   = Window:NewTab("ระบบอัตโนมัติ")
@@ -502,8 +337,48 @@ CrystalSec:NewButton("แบล็กลิสต์คริสตัลนี�
 end)
 
 -- Boulders & Runes Farming Section
-local SpecialSec = AutoTab:NewSection("ระบบฟาร์ม Boulders & Runes")
+local SpecialSec = AutoTab:NewSection("ระบบฟาร์ม RUNES & BOULDERS (พิเศษ)")
 
+-- Rune Suite UI Controls
+SpecialSec:NewToggle("ออโต้ฟาร์ม Runes (รูน)", "วาร์ปไปหา Rune ที่ใกล้ที่สุดและทำการเก็บ/ขุดอัตโนมัติ", function(v)
+    States.AutoRune = v
+    if not v then States.CurrentRune = nil end
+end)
+
+SpecialSec:NewSlider("เวลาเก็บ/ถือ Rune (วินาที)", "ปรับเวลาในการอยู่กับ Rune แต่ละชิ้น (0 = จนกว่าจะหายไป)", 15, 0, function(v)
+    States.RuneHoldTime = v
+end)
+
+SpecialSec:NewButton("ข้ามไป Rune ถัดไป", "สลับไปหา Rune เป้าหมายชิ้นใหม่ทันที", function()
+    if States.CurrentRune then States.SkipRuneCurrent = true end
+end)
+
+SpecialSec:NewButton("แบล็กลิสต์ Rune นี้", "บล็อก Rune ชิ้นปัจจุบันไม่ให้เก็บอีกในเซสชั่นนี้", function()
+    if States.CurrentRune then
+        local target = States.CurrentRune
+        RunePermanentBlacklist[target] = true
+        States.CurrentRune = nil 
+        Kavo:Notify("แบล็กลิสต์สำเร็จ", "Rune ชิ้นนี้จะไม่ถูกเล็งเป้าหมายอีกต่อไป", 3)
+    else
+        Kavo:Notify("ข้อผิดพลาด", "ไม่มี Rune เป้าหมายที่กำลังฟาร์มอยู่!", 3)
+    end
+end)
+
+SpecialSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
+    local r = GetNearestRune()
+    local root = GetRoot()
+    if r and root then
+        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
+        if targetPart then
+            root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
+            Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา Rune เรียบร้อยแล้ว", 3)
+        end
+    else
+        Kavo:Notify("ไม่พบเป้าหมาย", "ไม่พบ Rune ในบริเวณนี้", 3)
+    end
+end)
+
+-- Boulder UI Controls
 SpecialSec:NewToggle("ออโต้ฟาร์ม Boulders (หิน)", "วาร์ปไปหา Boulder ที่ใกล้ที่สุดและทำการขุดอัตโนมัติ", function(v)
     States.AutoBoulder = v
     if not v then States.CurrentBoulder = nil end
@@ -520,25 +395,6 @@ SpecialSec:NewButton("วาร์ปไป Boulder ที่ใกล้ที�
         end
     else
         Kavo:Notify("ไม่พบเป้าหมาย", "ไม่พบ Boulder ในบริเวณนี้", 3)
-    end
-end)
-
-SpecialSec:NewToggle("ออโต้ฟาร์ม Runes (รูน)", "วาร์ปไปหา Rune ที่ใกล้ที่สุดและทำการเก็บ/ขุดอัตโนมัติ", function(v)
-    States.AutoRune = v
-    if not v then States.CurrentRune = nil end
-end)
-
-SpecialSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
-    local r = GetNearestRune()
-    local root = GetRoot()
-    if r and root then
-        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา Rune เรียบร้อยแล้ว", 3)
-        end
-    else
-        Kavo:Notify("ไม่พบเป้าหมาย", "ไม่พบ Rune ในบริเวณนี้", 3)
     end
 end)
 
@@ -743,6 +599,90 @@ task.spawn(function()
     end
 end)
 
+-- ลูประบบติดตาม RUNES อัจฉริยะ (Sequential Rune Target Engine)
+task.spawn(function()
+    while true do
+        if States.AutoRune then
+            local myRoot = GetRoot()
+            if myRoot then
+                local now = os.clock()
+                
+                local rValid = States.CurrentRune and States.CurrentRune.Parent and States.CurrentRune:IsDescendantOf(Workspace)
+                
+                local forcedRuneSkip = States.SkipRuneCurrent
+                if forcedRuneSkip then
+                    States.SkipRuneCurrent = false
+                end
+
+                local runeTimeIsUp = false
+                if States.RuneHoldTime > 0 then
+                    runeTimeIsUp = (now - States.RuneLockTimestamp) >= States.RuneHoldTime
+                end
+                
+                -- กันติดขัด Timeout สำหรับ Rune
+                if rValid and States.RuneHoldTime > 0 and (now - RuneTargetStartTime > States.RuneHoldTime + 10) then
+                    RunePermanentBlacklist[States.CurrentRune] = true
+                    States.CurrentRune = nil
+                    rValid = false
+                end
+
+                if not rValid and not forcedRuneSkip then
+                    States.CurrentRune = nil
+                    local newTarget = GetNearestRune()
+                    if newTarget then
+                        States.CurrentRune = newTarget
+                        RuneTargetStartTime = now
+                        States.RuneLockTimestamp = now
+                    end
+                elseif runeTimeIsUp or forcedRuneSkip then
+                    local oldRune = States.CurrentRune
+                    States.CurrentRune = nil
+                    
+                    local closest = nil
+                    local shortestDistance = math.huge
+                    
+                    if RunesFolder then
+                        for _, rune in ipairs(RunesFolder:GetChildren()) do
+                            if rune and rune.Parent and rune ~= oldRune and not RunePermanentBlacklist[rune] then
+                                local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
+                                if targetPart then
+                                    local dist = (myRoot.Position - targetPart.Position).Magnitude
+                                    if dist < shortestDistance then
+                                        shortestDistance = dist
+                                        closest = rune
+                                   end
+                                end
+                            end
+                        end
+                    end
+                    
+                    if closest then
+                        States.CurrentRune = closest
+                        RuneTargetStartTime = now
+                        States.RuneLockTimestamp = now
+                    else
+                        States.CurrentRune = oldRune
+                        States.RuneLockTimestamp = now 
+                    end
+                end
+
+                if States.CurrentRune then
+                    pcall(function()
+                        local r = States.CurrentRune
+                        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
+                        if targetPart then
+                            myRoot.Velocity = Vector3.new(0, 0, 0)
+                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
+                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(0.01)
+    end
+end)
+
 -- ลูประบบติดตาม Boulder ฟาร์มอัตโนมัติ
 task.spawn(function()
     while true do
@@ -758,34 +698,6 @@ task.spawn(function()
                     pcall(function()
                         local b = States.CurrentBoulder
                         local targetPart = b:IsA("BasePart") and b or b:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart then
-                            myRoot.Velocity = Vector3.new(0, 0, 0)
-                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
-                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
-                        end
-                    end)
-                end
-            end
-        end
-        task.wait(0.05)
-    end
-end)
-
--- ลูประบบติดตาม Rune ฟาร์มอัตโนมัติ
-task.spawn(function()
-    while true do
-        if States.AutoRune then
-            local myRoot = GetRoot()
-            if myRoot then
-                local rValid = States.CurrentRune and States.CurrentRune.Parent and States.CurrentRune:IsDescendantOf(Workspace)
-                if not rValid then
-                    States.CurrentRune = GetNearestRune()
-                end
-
-                if States.CurrentRune then
-                    pcall(function()
-                        local r = States.CurrentRune
-                        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
                         if targetPart then
                             myRoot.Velocity = Vector3.new(0, 0, 0)
                             myRoot.RotVelocity = Vector3.new(0, 0, 0)

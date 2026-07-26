@@ -1,5 +1,4 @@
--- Reviewed by ChatGPT
--- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.3 (ภาษาไทย + Boulders & Runes) ]] --
+-- [[ Daley Hub - Kavo Exploration & Utility Suite v2.4.0 (Fixed & Runes Included) ]] --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,7 +10,7 @@ local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
 -- ==========================================
--- [[ REMOTES & PATHS / พาธและรีโมท ]] --
+-- [[ REMOTE & INSTANCE PATHS (SAFE SCAN) ]] --
 -- ==========================================
 local RemotesFolder = ReplicatedStorage:WaitForChild("Remotes", 3)
 local DigRequest = RemotesFolder and RemotesFolder:WaitForChild("DigRequest", 2)
@@ -19,83 +18,85 @@ local SellRequest = RemotesFolder and RemotesFolder:WaitForChild("SellRequest", 
 local UpgradeBuy = RemotesFolder and RemotesFolder:WaitForChild("UpgradeBuy", 2) 
 
 local ThingsFolder = Workspace:WaitForChild("Things", 3)
-local CrystalsFolder = ThingsFolder and ThingsFolder:FindFirstChild("Crystals") or Workspace:FindFirstChild("Crystals")
--- local BouldersFolder = ThingsFolder and ThingsFolder:FindFirstChild("Boulders") or Workspace:FindFirstChild("Boulders")
--- local RunesFolder    = ThingsFolder and ThingsFolder:FindFirstChild("Runes") or Workspace:FindFirstChild("Runes")
+local CrystalsFolder = ThingsFolder and ThingsFolder:WaitForChild("Crystals", 2) or Workspace:FindFirstChild("Crystals")
 
-local Mountain = Workspace:WaitForChild("MountainDecoration")
+-- ค้นหาโฟลเดอร์ Runes แบบปลอดภัย ป้องกันสคริปต์ค้าง (Non-blocking)
+local Mountain = Workspace:FindFirstChild("MountainDecoration")
+local RunesFolder = (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) 
+                 or Workspace:FindFirstChild("Runes") 
+                 or (Mountain and Mountain:FindFirstChild("Runes"))
 
-local BouldersFolder = Mountain:WaitForChild("Boulders")
-local RunesFolder = Mountain:WaitForChild("Runes")
-
--- ฟังชั่นติดตามโฟลเดอร์ในแมพในกรณีที่โหลดทีหลัง
+-- ดักจับการโหลดโฟลเดอร์ในแมพย้อนหลัง
 if ThingsFolder then
     ThingsFolder.ChildAdded:Connect(function(child)
         if child.Name == "Crystals" then CrystalsFolder = child
-        elseif child.Name == "Boulders" then BouldersFolder = child
         elseif child.Name == "Runes" then RunesFolder = child end
     end)
 end
+Workspace.ChildAdded:Connect(function(child)
+    if child.Name == "Runes" then RunesFolder = child
+    elseif child.Name == "MountainDecoration" then
+        Mountain = child
+        local r = child:FindFirstChild("Runes")
+        if r then RunesFolder = r end
+    end
+end)
 
 -- ==========================================
--- [[ STATE STORAGE / ข้อมูลสถานะ ]] --
+-- [[ STATE STORAGE ]] --
 -- ==========================================
 local States = {
-    -- การเคลื่อนที่ (Locomotion)
+    -- Locomotion
     SpeedEnabled  = false,
     SpeedValue    = 50,
     FlyEnabled    = false,
     FlySpeed      = 50,
     NoclipEnabled = false,
 
-    -- การมองเห็น (Visuals / Scanner)
+    -- Visuals / Scanner
     PlayerESP      = false,
     CrystalESP     = false,
-    BoulderESP     = false,
     RuneESP        = false,
     SelectedPlayer = nil,
 
-    -- พิกัด (Coordinates Storage)
+    -- Coordinates Storage
     InputCoords    = "0, 0, 0",
 
-    -- ระบบอัตโนมัติ (Automation Suite)
+    -- Automation Suite
     AutoDigEnabled   = false,
     DiggerToolName   = "Rusty Scrapper",
     AutoSellEnabled  = false,
     
-    -- อัปเกรด Air (Air Upgrades)
+    -- Air Upgrades
     AutoAir1      = false,
     AutoAir2      = false,
     AutoAir3      = false,
 
-    -- อัปเกรด Weight (Weight Upgrades)
+    -- Weight Upgrades
     AutoWeight1      = false,
     AutoWeight2      = false,
     AutoWeight3      = false,
 
-    -- Crystal / Boulder / Rune Farming
+    -- Crystal Farming
     AutoCrystal      = false,
     CurrentCrystal   = nil,
     CrystalHoldTime  = 5,        
     LockTimestamp    = 0,
     SkipCurrent      = false,
 
-    AutoBoulder      = false,
-    CurrentBoulder   = nil,
-
+    -- Rune Farming
     AutoRune         = false,
     CurrentRune      = nil
 }
 
-local Player_ESP_Cache  = {}
+local Player_ESP_Cache = {}
 local Crystal_ESP_Cache = {}
-local Boulder_ESP_Cache = {}
-local Rune_ESP_Cache    = {}
+local Rune_ESP_Cache = {}
 local PermanentBlacklist = {}  
 local CrystalTargetStartTime = 0 
 
 -- ==========================================
--- [[ UTILITY FUNCTIONS / ฟังก์ชั่นช่วยเหลือ ]] --
+-- [[ UTILITY FUNCTIONS ]] --
 -- ==========================================
 local function GetRoot(player)
     local p = player or LP
@@ -114,26 +115,26 @@ local function GetOtherPlayers()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP then table.insert(names, p.Name) end
     end
-    if #names == 0 then table.insert(names, "ไม่มีผู้เล่นอื่น") end
+    if #names == 0 then table.insert(names, "None") end
     return names
 end
 
-local function GetNearestObjectFromFolder(folder)
-    if not folder then return nil end
+local function GetNearestCrystal()
+    if not CrystalsFolder then return nil end
     local myRoot = GetRoot()
     if not myRoot then return nil end
 
     local closest = nil
     local shortestDistance = math.huge
 
-    for _, item in ipairs(folder:GetChildren()) do
-        if item and item.Parent and not PermanentBlacklist[item] then
-            local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
+        if crystal and crystal.Parent and not PermanentBlacklist[crystal] then
+            local targetPart = crystal:IsA("BasePart") and crystal or crystal:FindFirstChildWhichIsA("BasePart", true)
             if targetPart then
                 local dist = (myRoot.Position - targetPart.Position).Magnitude
                 if dist < shortestDistance then
                     shortestDistance = dist
-                    closest = item
+                    closest = crystal
                 end
             end
         end
@@ -141,20 +142,34 @@ local function GetNearestObjectFromFolder(folder)
     return closest
 end
 
-local function GetNearestCrystal()
-    return GetNearestObjectFromFolder(CrystalsFolder)
-end
-
-local function GetNearestBoulder()
-    return GetNearestObjectFromFolder(BouldersFolder)
-end
-
 local function GetNearestRune()
-    return GetNearestObjectFromFolder(RunesFolder)
+    local folder = RunesFolder or (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
+    if not folder and Mountain then folder = Mountain:FindFirstChild("Runes") end
+    if not folder then return nil end
+
+    local myRoot = GetRoot()
+    if not myRoot then return nil end
+
+    local closest = nil
+    local shortestDistance = math.huge
+
+    for _, rune in ipairs(folder:GetChildren()) do
+        if rune and rune.Parent then
+            local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
+            if targetPart then
+                local dist = (myRoot.Position - targetPart.Position).Magnitude
+                if dist < shortestDistance then
+                    shortestDistance = dist
+                    closest = rune
+                end
+            end
+        end
+    end
+    return closest
 end
 
 -- ==========================================
--- [[ ESP SYSTEMS / ระบบการมองเห็นไฮไลต์ ]] --
+-- [[ ESP SYSTEMS ]] --
 -- ==========================================
 
 -- Player Chams
@@ -191,194 +206,82 @@ local function RemovePlayerESP(player)
     end
 end
 
--- Generic Highlight Creator
-local function CreateObjectESP(item, cache, color, stateKey)
-    if cache[item] then return end
+-- Crystal Chams
+local function CreateCrystalESP(crystal)
+    if Crystal_ESP_Cache[crystal] then return end
     
     local hl = Instance.new("Highlight")
-    hl.Name = "DaleyKavo_Highlight"
-    hl.FillColor = color
+    hl.Name = "DaleyKavo_CrystalHighlight"
+    hl.FillColor = Color3.fromRGB(190, 0, 255)
     hl.FillTransparency = 0.4
     hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.Adornee = item
-    hl.Enabled = States[stateKey]
-    hl.Parent = item
+    hl.Adornee = crystal
+    hl.Enabled = States.CrystalESP
+    hl.Parent = crystal
     
-    cache[item] = hl
+    Crystal_ESP_Cache[crystal] = hl
 end
 
-local function RemoveObjectESP(item, cache)
-    if cache[item] then
-        pcall(function() cache[item]:Destroy() end)
-        cache[item] = nil
+local function RemoveCrystalESP(crystal)
+    if Crystal_ESP_Cache[crystal] then
+        pcall(function()
+            Crystal_ESP_Cache[crystal]:Destroy()
+        end)
+        Crystal_ESP_Cache[crystal] = nil
     end
 end
 
--- Crystal ESP
-local function CreateCrystalESP(c) CreateObjectESP(c, Crystal_ESP_Cache, Color3.fromRGB(190, 0, 255), "CrystalESP") end
-local function RemoveCrystalESP(c) RemoveObjectESP(c, Crystal_ESP_Cache) end
-
--- Boulder ESP
-local function CreateBoulderESP(b) CreateObjectESP(b, Boulder_ESP_Cache, Color3.fromRGB(255, 140, 0), "BoulderESP") end
-local function RemoveBoulderESP(b) RemoveObjectESP(b, Boulder_ESP_Cache) end
-
--- Rune ESP
-local function CreateRuneESP(r) CreateObjectESP(r, Rune_ESP_Cache, Color3.fromRGB(0, 230, 255), "RuneESP") end
-local function RemoveRuneESP(r) RemoveObjectESP(r, Rune_ESP_Cache) end
-
--- Initialize Players ESP
-for _, p in ipairs(Players:GetPlayers()) do CreatePlayerESP(p) end
-Players.PlayerAdded:Connect(CreatePlayerESP)
-Players.PlayerRemoving:Connect(RemovePlayerESP)
-
--- Bind ESP to Folders
-local function BindFolderESP(folderGetter, createFunc, removeFunc)
-    task.spawn(function()
-        while true do
-            local folder = folderGetter()
-            if folder then
-                for _, child in ipairs(folder:GetChildren()) do createFunc(child) end
-                folder.ChildAdded:Connect(createFunc)
-                folder.ChildRemoved:Connect(removeFunc)
-                break
-            end
-            task.wait(1)
-        end
-    end)
-end
-
-BindFolderESP(function() return CrystalsFolder end, CreateCrystalESP, RemoveCrystalESP)
-BindFolderESP(function() return BouldersFolder end, CreateBoulderESP, RemoveBoulderESP)
-BindFolderESP(function() return RunesFolder end, CreateRuneESP, RemoveRuneESP)
-
-
--- ==========================================
--- [[ ระบบสแกนหาโฟลเดอร์ RUNES ]] --
--- ==========================================
-local Workspace = game:GetService("Workspace")
-local Players = game:GetService("Players")
-local LP = Players.LocalPlayer
-
-local ThingsFolder = Workspace:FindFirstChild("Things")
-local RunesFolder  = (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
-
--- ดักจับกรณีที่โฟลเดอร์ Runes โหลดขึ้นมาทีหลัง
-if ThingsFolder then
-    ThingsFolder.ChildAdded:Connect(function(child)
-        if child.Name == "Runes" then
-            RunesFolder = child
-        end
-    end)
-end
-
--- ==========================================
--- [[ ตัวแปรสถานะ (STATES & CACHE) ]] --
--- ==========================================
-local RuneState = {
-    AutoRune = false,      -- เปิด/ปิด ออโต้ฟาร์ม Runes
-    RuneESP  = false,      -- เปิด/ปิด ESP มองทะลุ Runes
-    CurrentRune = nil
-}
-
-local Rune_ESP_Cache = {}
-
--- ==========================================
--- [[ ฟังก์ชั่นช่วยเหลือ (UTILITY FUNCTIONS) ]] --
--- ==========================================
-
--- หาตำแหน่งตัวละครของเรา
-local function GetMyRoot()
-    local char = LP.Character
-    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
-end
-
--- ค้นหา Rune ชิ้นที่อยู่ใกล้เราที่สุด
-local function GetNearestRune()
-    if not RunesFolder then return nil end
-    local myRoot = GetMyRoot()
-    if not myRoot then return nil end
-
-    local closestRune = nil
-    local shortestDistance = math.huge
-
-    for _, rune in ipairs(RunesFolder:GetChildren()) do
-        if rune and rune.Parent then
-            local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-            if targetPart then
-                local dist = (myRoot.Position - targetPart.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closestRune = rune
-                end
-            end
-        end
-    end
-    return closestRune
-end
-
--- ฟังก์ชั่นวาร์ปไปหา Rune ชิ้นที่ใกล้ที่สุด 1 ครั้ง
-local function TeleportToNearestRune()
-    local nearestRune = GetNearestRune()
-    local myRoot = GetMyRoot()
-    if nearestRune and myRoot then
-        local targetPart = nearestRune:IsA("BasePart") and nearestRune or nearestRune:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            return true
-        end
-    end
-    return false
-end
-
--- ==========================================
--- [[ ระบบ ESP ไฮไลต์สีฟ้ามองทะลุ RUNES ]] --
--- ==========================================
-
+-- Rune Chams
 local function CreateRuneESP(rune)
     if Rune_ESP_Cache[rune] then return end
-
+    
     local hl = Instance.new("Highlight")
-    hl.Name = "RuneHighlight"
-
-    hl.FillColor = Color3.fromRGB(0,255,255)
-    hl.OutlineColor = Color3.fromRGB(255,255,255)
-
-    hl.FillTransparency = 0.2
+    hl.Name = "DaleyKavo_RuneHighlight"
+    hl.FillColor = Color3.fromRGB(0, 230, 255)
+    hl.FillTransparency = 0.3
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
     hl.OutlineTransparency = 0
-
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-
     hl.Adornee = rune
     hl.Enabled = States.RuneESP
     hl.Parent = rune
-
+    
     Rune_ESP_Cache[rune] = hl
 end
 
 local function RemoveRuneESP(rune)
     if Rune_ESP_Cache[rune] then
-        pcall(function() Rune_ESP_Cache[rune]:Destroy() end)
+        pcall(function()
+            Rune_ESP_Cache[rune]:Destroy()
+        end)
         Rune_ESP_Cache[rune] = nil
     end
 end
 
--- ฟังชั่นสลับ เปิด/ปิด ESP Runes ทั้งแมพ
-local function ToggleRuneESP(enabled)
-    RuneState.RuneESP = enabled
-    for _, hl in pairs(Rune_ESP_Cache) do
-        if hl then hl.Enabled = enabled end
+-- Initialize ESPs
+for _, p in ipairs(Players:GetPlayers()) do CreatePlayerESP(p) end
+Players.PlayerAdded:Connect(CreatePlayerESP)
+Players.PlayerRemoving:Connect(RemovePlayerESP)
+
+if CrystalsFolder then
+    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
+        CreateCrystalESP(crystal)
     end
+    CrystalsFolder.ChildAdded:Connect(CreateCrystalESP)
+    CrystalsFolder.ChildRemoved:Connect(RemoveCrystalESP)
 end
 
--- ผูกลูปสแกน ESP เข้ากับโฟลเดอร์ Runes
 task.spawn(function()
     while true do
-        if RunesFolder then
-            for _, rune in ipairs(RunesFolder:GetChildren()) do
+        local folder = RunesFolder or (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
+        if not folder and Mountain then folder = Mountain:FindFirstChild("Runes") end
+
+        if folder then
+            for _, rune in ipairs(folder:GetChildren()) do
                 CreateRuneESP(rune)
             end
-            RunesFolder.ChildAdded:Connect(CreateRuneESP)
-            RunesFolder.ChildRemoved:Connect(RemoveRuneESP)
+            folder.ChildAdded:Connect(CreateRuneESP)
+            folder.ChildRemoved:Connect(RemoveRuneESP)
             break
         end
         task.wait(1)
@@ -386,252 +289,185 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- [[ ลูปทำงานเบื้องหลัง (AUTO FARM & COLLECT) ]] --
--- ==========================================
-
--- 1. ลูปรอเปิด ProximityPrompt เพื่อเก็บ Rune อัตโนมัติ
-task.spawn(function()
-    while true do
-        if RuneState.AutoRune and RuneState.CurrentRune and fireproximityprompt then
-            pcall(function()
-                local prompt = RuneState.CurrentRune:FindFirstChildOfClass("ProximityPrompt") or RuneState.CurrentRune:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then
-                    fireproximityprompt(prompt)
-                end
-            end)
-        end
-        task.wait(0.1)
-    end
-end)
-
--- 2. ลูปวาร์ปล็อคตำแหน่งไปหา Rune ชิ้นที่ใกล้ที่สุด
-task.spawn(function()
-    while true do
-        if RuneState.AutoRune then
-            local myRoot = GetMyRoot()
-            if myRoot then
-                local isValid = RuneState.CurrentRune and RuneState.CurrentRune.Parent and RuneState.CurrentRune:IsDescendantOf(Workspace)
-                if not isValid then
-                    RuneState.CurrentRune = GetNearestRune()
-                end
-
-                if RuneState.CurrentRune then
-                    pcall(function()
-                        local rune = RuneState.CurrentRune
-                        local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart then
-                            myRoot.Velocity = Vector3.new(0, 0, 0)
-                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
-                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
-                        end
-                    end)
-                end
-            end
-        end
-        task.wait(0.05)
-    end
-end)
-
--- ==========================================
--- [[ KAVO LIBRARY CONFIGURATION / ตั้งค่า UI ]] --
+-- [[ KAVO LIBRARY CONFIGURATION ]] --
 -- ==========================================
 local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Kavo.CreateLib("EarthWst - ระบบรองรับภาษาไทย", "Midnight")
+local Window = Kavo.CreateLib("Daley Hub - Utility Engine", "Midnight")
 
--- local MoveTab   = Window:NewTab("การเคลื่อนที่")
-local AutoTab   = Window:NewTab("ระบบอัตโนมัติ")
-local ScanTab   = Window:NewTab("การมองเห็น & ESP")
-local CoordTab  = Window:NewTab("จัดการพิกัด")
-local Boulders  = Window:NewTab("รูน")
+local MoveTab   = Window:NewTab("Movement")
+local AutoTab   = Window:NewTab("Automation")
+local RuneTab   = Window:NewTab("รูน")
+local ScanTab   = Window:NewTab("Visuals & Scanner")
+local CoordTab  = Window:NewTab("Coordinates Manager")
 
 -- ==========================================
--- [[ MOVEMENT OPERATIONS / รูน ]] --
+-- [[ MOVEMENT OPERATIONS ]] --
 -- ==========================================
+local MoveSec = MoveTab:NewSection("Locomotion Controls")
 
-local RuneSec = Boulders:NewSection("ระบบ Rune")
+MoveSec:NewToggle("CFrame Speed Mode", "Speeds up horizontal translation vectors", function(v)
+    States.SpeedEnabled = v
+end)
 
-RuneSec:NewToggle("ESP Rune", "มองเห็น Rune ทั้งหมด", function(v)
-    States.RuneESP = v
+MoveSec:NewSlider("Walk Speed Scale", "Adjust speed magnitude", 250, 16, function(v)
+    States.SpeedValue = v
+end)
 
-    for _,hl in pairs(Rune_ESP_Cache) do
-        if hl then
-            hl.Enabled = v
-        end
+MoveSec:NewToggle("Fly Mode", "Allows free floating across workspace axises", function(v)
+    States.FlyEnabled = v
+    local hum = GetHumanoid()
+    if not v and hum then hum.PlatformStand = false end
+end)
+
+MoveSec:NewSlider("Fly Speed Scale", "Adjust fly movement vector magnitude", 250, 10, function(v)
+    States.FlySpeed = v
+end)
+
+MoveSec:NewToggle("Noclip Mesh Overrides", "Wipes collisions for character limbs", function(v)
+    States.NoclipEnabled = v
+end)
+
+-- ==========================================
+-- [[ AUTOMATION OPERATIONS ]] --
+-- ==========================================
+local AutoSec = AutoTab:NewSection("Utility Automation Loops")
+
+AutoSec:NewTextBox("Equipped Digger Tool Name", "Type your tool name (e.g. Rusty Scrapper)", function(text)
+    States.DiggerToolName = text
+end)
+
+AutoSec:NewToggle("Auto Dig Toggle", "Passively fires digging remotes in background", function(v)
+    States.AutoDigEnabled = v
+end)
+
+AutoSec:NewToggle("Auto Sell All Toggle", "Passively dumps full inventory to shop remote", function(v)
+    States.AutoSellEnabled = v
+end)
+
+-- Crystal Farming Section
+local CrystalSec = AutoTab:NewSection("Crystal Farming")
+
+CrystalSec:NewToggle("Auto Farm Crystals", "Teleports to nearest crystal and automatically mines it", function(v)
+    States.AutoCrystal = v
+    if not v then 
+        States.CurrentCrystal = nil 
     end
 end)
 
-RuneSec:NewToggle("Auto Rune", "ฟาร์ม Rune อัตโนมัติ", function(v)
-    States.AutoRune = v
+CrystalSec:NewSlider("Crystal Hold Timer (s)", "Adjust how many seconds to stay at each crystal (0 = stay until broken)", 15, 0, function(v)
+    States.CrystalHoldTime = v
+end)
 
+CrystalSec:NewButton("Next Crystal", "Skips the current targeted crystal instantly", function()
+    if States.CurrentCrystal then
+        States.SkipCurrent = true
+    end
+end)
+
+CrystalSec:NewButton("Blacklist Crystal", "Permanently blocks this targeted crystal for the session", function()
+    if States.CurrentCrystal then
+        local targetToBlacklist = States.CurrentCrystal
+        PermanentBlacklist[targetToBlacklist] = true
+        States.CurrentCrystal = nil 
+        Kavo:Notify("Blacklisted", "This crystal will no longer be targeted.", 3)
+    else
+        Kavo:Notify("Error", "No active crystal target to blacklist!", 3)
+    end
+end)
+
+-- Upgrades Interface
+local UpgradeSec = AutoTab:NewSection("Stat Upgrades")
+
+UpgradeSec:NewToggle("Auto Buy Air Tier 1", "Repeatedly purchases Air Level 1", function(v)
+    States.AutoAir1 = v
+end)
+
+UpgradeSec:NewToggle("Auto Buy Air Tier 2", "Repeatedly purchases Air Level 2", function(v)
+    States.AutoAir2 = v
+end)
+
+UpgradeSec:NewToggle("Auto Buy Air Tier 3", "Repeatedly purchases Air Level 3", function(v)
+    States.AutoAir3 = v
+end)
+
+UpgradeSec:NewToggle("Auto Buy Weight Tier 1", "Repeatedly purchases Weight Level 1", function(v)
+    States.AutoWeight1 = v
+end)
+
+UpgradeSec:NewToggle("Auto Buy Weight Tier 2", "Repeatedly purchases Weight Level 2", function(v)
+    States.AutoWeight2 = v
+end)
+
+UpgradeSec:NewToggle("Auto Buy Weight Tier 3", "Repeatedly purchases Weight Level 3", function(v)
+    States.AutoWeight3 = v
+end)
+
+-- ==========================================
+-- [[ RUNE OPERATIONS (หมวดหมู่ รูน) ]] --
+-- ==========================================
+local RuneSec = RuneTab:NewSection("ระบบค้นหา & ฟาร์ม Rune")
+
+RuneSec:NewToggle("เปิด ESP มอง Rune (Rune ESP)", "แสดงกรอบไฮไลต์สีฟ้าใส Rune ทั้งหมดในแมพ", function(v)
+    States.RuneESP = v
+    for _, hl in pairs(Rune_ESP_Cache) do
+        if hl then hl.Enabled = v end
+    end
+end)
+
+RuneSec:NewToggle("ออโต้ฟาร์ม Rune (Auto Rune)", "วาร์ปไปหา Rune ที่ใกล้ที่สุดและทำการกดเก็บอัตโนมัติ", function(v)
+    States.AutoRune = v
     if not v then
         States.CurrentRune = nil
     end
 end)
 
-RuneSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "Teleport", function()
-
+RuneSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
     local rune = GetNearestRune()
     local root = GetRoot()
-
     if rune and root then
         local part = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
-
         if part then
-            root.CFrame = CFrame.new(part.Position + Vector3.new(0,2,0))
-        end
-    end
-
-end)
-
-RuneSec:NewLabel("จำนวน Rune : 0")
-
--- ==========================================
--- [[ MOVEMENT OPERATIONS / เมนูการเคลื่อนที่ ]] --
--- ==========================================
--- local MoveSec = MoveTab:NewSection("การควบคุมตัวละคร")
-
--- MoveSec:NewToggle("โหมดความเร็ว (Speed)", "เร่งความเร็วการเดินในแนวระนาบ CFrame", function(v)
---     States.SpeedEnabled = v
--- end)
-
--- MoveSec:NewSlider("ระดับความเร็วการเดิน", "ปรับระดับความเร็วการเคลื่อนที่", 250, 16, function(v)
---     States.SpeedValue = v
--- end)
-
--- MoveSec:NewToggle("โหมดบิน (Fly Mode)", "บินได้อย่างอิสระบนอากาศทุกทิศทาง", function(v)
---     States.FlyEnabled = v
---     local hum = GetHumanoid()
---     if not v and hum then hum.PlatformStand = false end
--- end)
-
--- MoveSec:NewSlider("ระดับความเร็วการบิน", "ปรับระดับความเร็วในการบิน", 250, 10, function(v)
---     States.FlySpeed = v
--- end)
-
--- MoveSec:NewToggle("เดินทะลุสิ่งกีดขวาง (Noclip)", "ปิดแรงปะทะของร่างกายทำให้เดินทะลุบล็อกได้", function(v)
---     States.NoclipEnabled = v
--- end)
-
--- ==========================================
--- [[ AUTOMATION OPERATIONS / เมนูระบบอัตโนมัติ ]] --
--- ==========================================
-local AutoSec = AutoTab:NewSection("ฟังก์ชั่นทำงานอัตโนมัติทั่วไป")
-
-AutoSec:NewTextBox("ชื่ออุปกรณ์ขุดที่ถืออยู่", "พิมพ์ชื่อไอเทมขุด (เช่น Rusty Scrapper)", function(text)
-    States.DiggerToolName = text
-end)
-
-AutoSec:NewToggle("ออโต้ขุด (Auto Dig)", "ส่งสัญญาณขุดไอเทมในเบื้องหลังให้อัตโนมัติ", function(v)
-    States.AutoDigEnabled = v
-end)
-
-AutoSec:NewToggle("ออโต้ขายของทั้งหมด (Auto Sell)", "ส่งของในกระเป๋าขายร้านให้อัตโนมัติ", function(v)
-    States.AutoSellEnabled = v
-end)
-
--- Crystal Farming Section
-local CrystalSec = AutoTab:NewSection("ระบบฟาร์มคริสตัล (Crystal Farm)")
-
-CrystalSec:NewToggle("ออโต้ฟาร์มคริสตัล", "วาร์ปไปหาคริสตัลที่ใกล้ที่สุดและทำการขุดอัตโนมัติ", function(v)
-    States.AutoCrystal = v
-    if not v then States.CurrentCrystal = nil end
-end)
-
-CrystalSec:NewSlider("เวลาถือขุดคริสตัล (วินาที)", "ปรับเวลาในการอยู่ฟาร์มคริสตัลแต่ละก้อน (0 = ฟาร์มจนกว่าจะแตก)", 15, 0, function(v)
-    States.CrystalHoldTime = v
-end)
-
-CrystalSec:NewButton("ข้ามไปคริสตัลถัดไป", "สลับไปหาคริสตัลเป้าหมายก้อนใหม่ทันที", function()
-    if States.CurrentCrystal then States.SkipCurrent = true end
-end)
-
-CrystalSec:NewButton("แบล็กลิสต์คริสตัลนี้", "บล็อกคริสตัลก้อนปัจจุบันไม่ให้ฟาร์มอีกในเซสชั่นนี้", function()
-    if States.CurrentCrystal then
-        PermanentBlacklist[States.CurrentCrystal] = true
-        States.CurrentCrystal = nil 
-        Kavo:Notify("แบล็กลิสต์สำเร็จ", "คริสตัลก้อนนี้จะไม่ถูกเล็งเป้าหมายอีกต่อไป", 3)
-    else
-        Kavo:Notify("ข้อผิดพลาด", "ไม่มีคริสตัลเป้าหมายที่กำลังฟาร์มอยู่!", 3)
-    end
-end)
-
--- Boulders & Runes Farming Section
-local SpecialSec = AutoTab:NewSection("ระบบฟาร์ม Boulders & Runes")
-
-SpecialSec:NewToggle("ออโต้ฟาร์ม Boulders (หิน)", "วาร์ปไปหา Boulder ที่ใกล้ที่สุดและทำการขุดอัตโนมัติ", function(v)
-    States.AutoBoulder = v
-    if not v then States.CurrentBoulder = nil end
-end)
-
-SpecialSec:NewButton("วาร์ปไป Boulder ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Boulder ก้อนที่ใกล้ที่สุดทันที", function()
-    local b = GetNearestBoulder()
-    local root = GetRoot()
-    if b and root then
-        local targetPart = b:IsA("BasePart") and b or b:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา Boulder เรียบร้อยแล้ว", 3)
-        end
-    else
-        Kavo:Notify("ไม่พบเป้าหมาย", "ไม่พบ Boulder ในบริเวณนี้", 3)
-    end
-end)
-
-
-SpecialSec:NewButton("วาร์ปไป Rune ที่ใกล้ที่สุด", "เทเลพอร์ตตัวเราไปหา Rune ชิ้นที่ใกล้ที่สุดทันที", function()
-    local r = GetNearestRune()
-    local root = GetRoot()
-    if r and root then
-        local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
+            root.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
             Kavo:Notify("วาร์ปสำเร็จ", "เทเลพอร์ตไปหา Rune เรียบร้อยแล้ว", 3)
         end
     else
-        Kavo:Notify("ไม่พบเป้าหมาย", "ไม่พบ Rune ในบริเวณนี้", 3)
+        Kavo:Notify("ข้อผิดพลาด", "ไม่พบ Rune ในบริเวณนี้!", 3)
     end
 end)
 
--- Upgrades Interface
-local UpgradeSec = AutoTab:NewSection("ระบบซื้ออัปเกรดอัตโนมัติ")
-
-UpgradeSec:NewToggle("ออโต้ซื้อ Air ระดับ 1", "ซื้ออัปเกรด Air Level 1 ซ้ำๆ อัตโนมัติ", function(v) States.AutoAir1 = v end)
-UpgradeSec:NewToggle("ออโต้ซื้อ Air ระดับ 2", "ซื้ออัปเกรด Air Level 2 ซ้ำๆ อัตโนมัติ", function(v) States.AutoAir2 = v end)
-UpgradeSec:NewToggle("ออโต้ซื้อ Air ระดับ 3", "ซื้ออัปเกรด Air Level 3 ซ้ำๆ อัตโนมัติ", function(v) States.AutoAir3 = v end)
-
-UpgradeSec:NewToggle("ออโต้ซื้อ Weight ระดับ 1", "ซื้ออัปเกรด Weight Level 1 ซ้ำๆ อัตโนมัติ", function(v) States.AutoWeight1 = v end)
-UpgradeSec:NewToggle("ออโต้ซื้อ Weight ระดับ 2", "ซื้ออัปเกรด Weight Level 2 ซ้ำๆ อัตโนมัติ", function(v) States.AutoWeight2 = v end)
-UpgradeSec:NewToggle("ออโต้ซื้อ Weight ระดับ 3", "ซื้ออัปเกรด Weight Level 3 ซ้ำๆ อัตโนมัติ", function(v) States.AutoWeight3 = v end)
-
 -- ==========================================
--- [[ VISUALS & SCANNER OPERATIONS / เมนูการมองเห็น ]] --
+-- [[ VISUALS & SCANNER OPERATIONS ]] --
 -- ==========================================
-local ScanSec = ScanTab:NewSection("ระบบมองทะลุ & ESP")
+local ScanSec = ScanTab:NewSection("Render Profiles & ESP")
 
-ScanSec:NewToggle("เปิด ESP มองผู้เล่น (Player ESP)", "เปิดกรอบไฮไลต์ผู้เล่นทุกคนในเซิร์ฟเวอร์", function(v)
+ScanSec:NewToggle("Enable Server Chams ESP", "Toggles highlighting on all remote clients", function(v)
     States.PlayerESP = v
     for _, container in pairs(Player_ESP_Cache) do
-        if container.Highlight then container.Highlight.Enabled = v end
+        if container.Highlight then
+            container.Highlight.Enabled = v
+        end
     end
 end)
 
-ScanSec:NewToggle("เปิด ESP มองหิน Boulders (Boulder ESP)", "เปิดสีไฮไลต์หิน Boulders บนแผนที่ (สีส้ม)", function(v)
-    States.BoulderESP = v
-    for _, highlight in pairs(Boulder_ESP_Cache) do
-        if highlight then highlight.Enabled = v end
+ScanSec:NewToggle("Enable Crystal ESP", "Toggles full colored chams across all crystal assets", function(v)
+    States.CrystalESP = v
+    for _, highlight in pairs(Crystal_ESP_Cache) do
+        if highlight then
+            highlight.Enabled = v
+        end
     end
 end)
 
-local PlayerDropdown = ScanSec:NewDropdown("เลือกผู้เล่นเป้าหมาย", "เลือกชื่อผู้เล่นเพื่อทำการเทเลพอร์ต", GetOtherPlayers(), function(selected)
+local PlayerDropdown = ScanSec:NewDropdown("Select Target Client", "Choose a player to execute actions on", GetOtherPlayers(), function(selected)
     States.SelectedPlayer = selected
 end)
 
-ScanSec:NewButton("รีเฟรชรายชื่อผู้เล่น", "ค้นหารายชื่อผู้เล่นใหม่ในเซิร์ฟเวอร์", function()
+ScanSec:NewButton("Refresh Server Directory", "Rescans players in server instance", function()
     PlayerDropdown:Refresh(GetOtherPlayers())
 end)
 
-ScanSec:NewButton("วาร์ปไปหาผู้เล่นที่เลือก", "เทเลพอร์ตตัวเราไปอยู่ด้านหลังผู้เล่นเป้าหมายทันที", function()
-    if States.SelectedPlayer and States.SelectedPlayer ~= "ไม่มีผู้เล่นอื่น" and States.SelectedPlayer ~= "None" then
+ScanSec:NewButton("Teleport to Target", "Instantly snaps your coordinate matrix to target player", function()
+    if States.SelectedPlayer and States.SelectedPlayer ~= "None" then
         local targetPlr = Players:FindFirstChild(States.SelectedPlayer)
         local myRoot = GetRoot()
         local tRoot = GetRoot(targetPlr)
@@ -642,20 +478,20 @@ ScanSec:NewButton("วาร์ปไปหาผู้เล่นที่เ�
 end)
 
 -- ==========================================
--- [[ COORDINATE MANAGEMENT OPERATIONS / เมนูจัดการพิกัด ]] --
+-- [[ COORDINATE MANAGEMENT OPERATIONS ]] --
 -- ==========================================
-local CoordSec = CoordTab:NewSection("ตำแหน่ง & พิกัดเวกเตอร์")
+local CoordSec = CoordTab:NewSection("Waypoints & Vectors")
 
-local CurrentPosLabel = CoordSec:NewLabel("พิกัดปัจจุบัน: X:0, Y:0, Z:0")
+local CurrentPosLabel = CoordSec:NewLabel("Current Location: X:0, Y:0, Z:0")
 
-CoordSec:NewButton("วาร์ปกลับจุดเกิด (Spawn)", "เทเลพอร์ตกลับไปยังจุดเกิดทันที", function()
+CoordSec:NewButton("Teleport to Spawn", "Instantly warp back to spawn zone", function()
     local root = GetRoot()
     if root then
         root.CFrame = CFrame.new(Vector3.new(-13.78, 29.22, 1075.75))
     end
 end)
 
-CoordSec:NewButton("คัดลอกพิกัดปัจจุบัน", "บันทึกพิกัด X, Y, Z ปัจจุบันไปยัง Clipboard", function()
+CoordSec:NewButton("Copy Current Coordinates", "Saves your position straight to clipboard", function()
     local root = GetRoot()
     if root then
         local pos = root.Position
@@ -663,27 +499,29 @@ CoordSec:NewButton("คัดลอกพิกัดปัจจุบัน", 
         
         if setclipboard then
             setclipboard(cleanCoords)
-            Kavo:Notify("คัดลอกสำเร็จ", "คัดลอกพิกัดลง Clipboard แล้ว: " .. cleanCoords, 3)
+            Kavo:Notify("Success", "Coordinates copied to clipboard: " .. cleanCoords, 3)
         else
-            Kavo:Notify("ข้อผิดพลาด Executor", "Executor ของคุณไม่รองรับฟังก์ชั่น setclipboard!", 3)
+            Kavo:Notify("Executor Error", "Your executor does not support setclipboard!", 3)
         end
     end
 end)
 
 -- ==========================================
--- [[ DAEMON FRAME TRACKING LOOP CONNECTIONS / ลูปเบื้องหลัง ]] --
+-- [[ DAEMON FRAME TRACKING LOOP CONNECTIONS ]] --
 -- ==========================================
 
--- ลูปกด ProximityPrompt คริสตัล / Boulders / Runes อัตโนมัติ
+-- Proximity Prompt Trigger Daemon (Crystals & Runes)
 task.spawn(function()
     while true do
         if fireproximityprompt then
             pcall(function()
                 local target = nil
-                if States.AutoCrystal and States.CurrentCrystal then target = States.CurrentCrystal
-                elseif States.AutoBoulder and States.CurrentBoulder then target = States.CurrentBoulder
-                elseif States.AutoRune and States.CurrentRune then target = States.CurrentRune end
-                
+                if States.AutoCrystal and States.CurrentCrystal then
+                    target = States.CurrentCrystal
+                elseif States.AutoRune and States.CurrentRune then
+                    target = States.CurrentRune
+                end
+
                 if target then
                     local prompt = target:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildWhichIsA("ProximityPrompt", true)
                     if prompt then
@@ -696,7 +534,7 @@ task.spawn(function()
     end
 end)
 
--- ลูประบบติดตามคริสตัลและคำนวณระยะทาง
+-- Crystal Sequential Target Tracking Loop
 task.spawn(function()
     while true do
         if States.AutoCrystal then
@@ -779,35 +617,7 @@ task.spawn(function()
     end
 end)
 
--- ลูประบบติดตาม Boulder ฟาร์มอัตโนมัติ
-task.spawn(function()
-    while true do
-        if States.AutoBoulder then
-            local myRoot = GetRoot()
-            if myRoot then
-                local bValid = States.CurrentBoulder and States.CurrentBoulder.Parent and States.CurrentBoulder:IsDescendantOf(Workspace)
-                if not bValid then
-                    States.CurrentBoulder = GetNearestBoulder()
-                end
-
-                if States.CurrentBoulder then
-                    pcall(function()
-                        local b = States.CurrentBoulder
-                        local targetPart = b:IsA("BasePart") and b or b:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart then
-                            myRoot.Velocity = Vector3.new(0, 0, 0)
-                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
-                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
-                        end
-                    end)
-                end
-            end
-        end
-        task.wait(0.05)
-    end
-end)
-
--- ลูประบบติดตาม Rune ฟาร์มอัตโนมัติ
+-- Rune Target Tracking & CFrame Loop
 task.spawn(function()
     while true do
         if States.AutoRune then
@@ -835,7 +645,7 @@ task.spawn(function()
     end
 end)
 
--- ลูปส่งสัญญาณออโต้ขุด (Auto Dig)
+-- Remote Event Auto Dig Thread
 task.spawn(function()
     while true do
         if States.AutoDigEnabled and DigRequest then
@@ -847,7 +657,7 @@ task.spawn(function()
     end
 end)
 
--- ลูปส่งสัญญาณออโต้ขาย (Auto Sell)
+-- Remote Event Auto Sell Thread
 task.spawn(function()
     while true do
         if States.AutoSellEnabled and SellRequest then
@@ -859,7 +669,7 @@ task.spawn(function()
     end
 end)
 
--- ลูปซื้ออัปเกรดอัตโนมัติ (Stat Upgrades)
+-- Stat Upgrade Daemon Thread
 task.spawn(function()
     while true do
         if UpgradeBuy then
@@ -875,50 +685,53 @@ task.spawn(function()
     end
 end)
 
--- ลูปอัปเดตข้อความพิกัดบน UI
+-- Positional Tracker Frame UI update loop
 task.spawn(function()
     while true do
         local root = GetRoot()
         if root then
             local pos = root.Position
-            CurrentPosLabel:UpdateLabel(string.format("พิกัดปัจจุบัน: X: %.1f, Y: %.1f, Z: %.1f", pos.X, pos.Y, pos.Z))
+            CurrentPosLabel:UpdateLabel(string.format("Current Location: X: %.1f, Y: %.1f, Z: %.1f", pos.X, pos.Y, pos.Z))
         end
         task.wait(0.2)
     end
 end)
 
--- ลูปควบคุมฟิสิกส์และการเดิน/บิน (Heartbeat)
--- RunService.Heartbeat:Connect(function(deltaTime)
---     local root = GetRoot()
---     local hum = GetHumanoid()
---     if not root or not hum then return end
+-- Core Physics & Locomotion Thread Hook
+RunService.Heartbeat:Connect(function(deltaTime)
+    local root = GetRoot()
+    local hum = GetHumanoid()
+    if not root or not hum then return end
 
---     if States.NoclipEnabled and LP.Character then
---         for _, descendant in ipairs(LP.Character:GetChildren()) do
---             if descendant:IsA("BasePart") then descendant.CanCollide = false end
---         end
---     end
+    -- Noclip Loop
+    if States.NoclipEnabled and LP.Character then
+        for _, descendant in ipairs(LP.Character:GetChildren()) do
+            if descendant:IsA("BasePart") then descendant.CanCollide = false end
+        end
+    end
 
---     if States.FlyEnabled then
---         hum.PlatformStand = true
---         local flyDirection = Vector3.new(0, 0, 0)
---         if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
---         if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
---         if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
---         if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
---         if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
---         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
---         if flyDirection.Magnitude > 0 then root.Velocity = flyDirection.Unit * States.FlySpeed else root.Velocity = Vector3.new(0, 0, 0) end
---     else
---         if hum.PlatformStand then hum.PlatformStand = false end
---         if States.SpeedEnabled then
---             local moveDirection = Vector3.new(0, 0, 0)
---             if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
---             if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
---             if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
---             if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
---             moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
---             if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
---         end
---     end
--- end)
+    -- Fly Loop
+    if States.FlyEnabled then
+        hum.PlatformStand = true
+        local flyDirection = Vector3.new(0, 0, 0)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
+        if flyDirection.Magnitude > 0 then root.Velocity = flyDirection.Unit * States.FlySpeed else root.Velocity = Vector3.new(0, 0, 0) end
+    else
+        -- Walkspeed Loop
+        if hum.PlatformStand then hum.PlatformStand = false end
+        if States.SpeedEnabled then
+            local moveDirection = Vector3.new(0, 0, 0)
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
+            moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
+            if moveDirection.Magnitude > 0 then root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime) end
+        end
+    end
+end)

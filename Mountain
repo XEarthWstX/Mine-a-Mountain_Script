@@ -245,11 +245,186 @@ BindFolderESP(function() return CrystalsFolder end, CreateCrystalESP, RemoveCrys
 BindFolderESP(function() return BouldersFolder end, CreateBoulderESP, RemoveBoulderESP)
 BindFolderESP(function() return RunesFolder end, CreateRuneESP, RemoveRuneESP)
 
+
+-- ==========================================
+-- [[ ระบบสแกนหาโฟลเดอร์ RUNES ]] --
+-- ==========================================
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+
+local ThingsFolder = Workspace:FindFirstChild("Things")
+local RunesFolder  = (ThingsFolder and ThingsFolder:FindFirstChild("Runes")) or Workspace:FindFirstChild("Runes")
+
+-- ดักจับกรณีที่โฟลเดอร์ Runes โหลดขึ้นมาทีหลัง
+if ThingsFolder then
+    ThingsFolder.ChildAdded:Connect(function(child)
+        if child.Name == "Runes" then
+            RunesFolder = child
+        end
+    end)
+end
+
+-- ==========================================
+-- [[ ตัวแปรสถานะ (STATES & CACHE) ]] --
+-- ==========================================
+local RuneState = {
+    AutoRune = false,      -- เปิด/ปิด ออโต้ฟาร์ม Runes
+    RuneESP  = false,      -- เปิด/ปิด ESP มองทะลุ Runes
+    CurrentRune = nil
+}
+
+local Rune_ESP_Cache = {}
+
+-- ==========================================
+-- [[ ฟังก์ชั่นช่วยเหลือ (UTILITY FUNCTIONS) ]] --
+-- ==========================================
+
+-- หาตำแหน่งตัวละครของเรา
+local function GetMyRoot()
+    local char = LP.Character
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
+end
+
+-- ค้นหา Rune ชิ้นที่อยู่ใกล้เราที่สุด
+local function GetNearestRune()
+    if not RunesFolder then return nil end
+    local myRoot = GetMyRoot()
+    if not myRoot then return nil end
+
+    local closestRune = nil
+    local shortestDistance = math.huge
+
+    for _, rune in ipairs(RunesFolder:GetChildren()) do
+        if rune and rune.Parent then
+            local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
+            if targetPart then
+                local dist = (myRoot.Position - targetPart.Position).Magnitude
+                if dist < shortestDistance then
+                    shortestDistance = dist
+                    closestRune = rune
+                end
+            end
+        end
+    end
+    return closestRune
+end
+
+-- ฟังก์ชั่นวาร์ปไปหา Rune ชิ้นที่ใกล้ที่สุด 1 ครั้ง
+local function TeleportToNearestRune()
+    local nearestRune = GetNearestRune()
+    local myRoot = GetMyRoot()
+    if nearestRune and myRoot then
+        local targetPart = nearestRune:IsA("BasePart") and nearestRune or nearestRune:FindFirstChildWhichIsA("BasePart", true)
+        if targetPart then
+            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
+            return true
+        end
+    end
+    return false
+end
+
+-- ==========================================
+-- [[ ระบบ ESP ไฮไลต์สีฟ้ามองทะลุ RUNES ]] --
+-- ==========================================
+
+local function CreateRuneESP(rune)
+    if Rune_ESP_Cache[rune] then return end
+    
+    local hl = Instance.new("Highlight")
+    hl.Name = "RuneHighlight_ESP"
+    hl.FillColor = Color3.fromRGB(0, 230, 255) -- ไฮไลต์สีฟ้าสว่าง
+    hl.FillTransparency = 0.4
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.Adornee = rune
+    hl.Enabled = RuneState.RuneESP
+    hl.Parent = rune
+    
+    Rune_ESP_Cache[rune] = hl
+end
+
+local function RemoveRuneESP(rune)
+    if Rune_ESP_Cache[rune] then
+        pcall(function() Rune_ESP_Cache[rune]:Destroy() end)
+        Rune_ESP_Cache[rune] = nil
+    end
+end
+
+-- ฟังชั่นสลับ เปิด/ปิด ESP Runes ทั้งแมพ
+local function ToggleRuneESP(enabled)
+    RuneState.RuneESP = enabled
+    for _, hl in pairs(Rune_ESP_Cache) do
+        if hl then hl.Enabled = enabled end
+    end
+end
+
+-- ผูกลูปสแกน ESP เข้ากับโฟลเดอร์ Runes
+task.spawn(function()
+    while true do
+        if RunesFolder then
+            for _, rune in ipairs(RunesFolder:GetChildren()) do
+                CreateRuneESP(rune)
+            end
+            RunesFolder.ChildAdded:Connect(CreateRuneESP)
+            RunesFolder.ChildRemoved:Connect(RemoveRuneESP)
+            break
+        end
+        task.wait(1)
+    end
+end)
+
+-- ==========================================
+-- [[ ลูปทำงานเบื้องหลัง (AUTO FARM & COLLECT) ]] --
+-- ==========================================
+
+-- 1. ลูปรอเปิด ProximityPrompt เพื่อเก็บ Rune อัตโนมัติ
+task.spawn(function()
+    while true do
+        if RuneState.AutoRune and RuneState.CurrentRune and fireproximityprompt then
+            pcall(function()
+                local prompt = RuneState.CurrentRune:FindFirstChildOfClass("ProximityPrompt") or RuneState.CurrentRune:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then
+                    fireproximityprompt(prompt)
+                end
+            end)
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- 2. ลูปวาร์ปล็อคตำแหน่งไปหา Rune ชิ้นที่ใกล้ที่สุด
+task.spawn(function()
+    while true do
+        if RuneState.AutoRune then
+            local myRoot = GetMyRoot()
+            if myRoot then
+                local isValid = RuneState.CurrentRune and RuneState.CurrentRune.Parent and RuneState.CurrentRune:IsDescendantOf(Workspace)
+                if not isValid then
+                    RuneState.CurrentRune = GetNearestRune()
+                end
+
+                if RuneState.CurrentRune then
+                    pcall(function()
+                        local rune = RuneState.CurrentRune
+                        local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart", true)
+                        if targetPart then
+                            myRoot.Velocity = Vector3.new(0, 0, 0)
+                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
+                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(0.05)
+    end
+end)
+
 -- ==========================================
 -- [[ KAVO LIBRARY CONFIGURATION / ตั้งค่า UI ]] --
 -- ==========================================
 local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Kavo.CreateLib("Daley Hub - ระบบช่วยเหลือ v2.3.3", "Midnight")
+local Window = Kavo.CreateLib("EarthWst - ระบบรองรับภาษาไทย", "Midnight")
 
 local MoveTab   = Window:NewTab("การเคลื่อนที่")
 local AutoTab   = Window:NewTab("ระบบอัตโนมัติ")

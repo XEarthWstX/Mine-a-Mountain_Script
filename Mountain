@@ -1,4 +1,4 @@
--- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.4 (ภาษาไทย + MountainDecorations.Boulders Path Fix) ]] --
+-- [[ Daley Hub - Kavo Exploration & Utility Suite v2.3.4 (ภาษาไทย + Nocturnite Boulders Fix) ]] --
 
 local success, err = pcall(function()
 
@@ -25,7 +25,6 @@ local MountainDecorations = Workspace:WaitForChild("MountainDecorations", 3)
 
 local CrystalsFolder = ThingsFolder and ThingsFolder:FindFirstChild("Crystals") or Workspace:FindFirstChild("Crystals")
 
--- สแกนพาธ Boulders จาก MountainDecorations.Boulders ตามที่ส่องเจอใน Dark Dex
 local BouldersFolder = (MountainDecorations and MountainDecorations:FindFirstChild("Boulders")) 
                     or (ThingsFolder and ThingsFolder:FindFirstChild("Boulders")) 
                     or Workspace:FindFirstChild("Boulders")
@@ -34,7 +33,6 @@ local RunesFolder    = ThingsFolder and ThingsFolder:FindFirstChild("Runes")
                     or (MountainDecorations and MountainDecorations:FindFirstChild("Runes")) 
                     or Workspace:FindFirstChild("Runes")
 
--- ฟังชั่นติดตามโฟลเดอร์ในแมพในกรณีที่โหลดทีหลัง
 if ThingsFolder then
     ThingsFolder.ChildAdded:Connect(function(child)
         if child.Name == "Crystals" then CrystalsFolder = child
@@ -140,10 +138,8 @@ local function GetNearestObjectFromFolder(folder, blacklist)
     local shortestDistance = math.huge
     local bl = blacklist or PermanentBlacklist
 
-    -- ตรวจสอบทั้งไอเทมหลักและโมเดลย่อย (เช่น MountainDecorations.Boulders.Nocturnite)
     for _, item in ipairs(folder:GetChildren()) do
         if item and item.Parent and not bl[item] then
-            -- ถ้าเป็นโมเดลกลุ่มแร่ (เช่น Nocturnite) ให้ค้นหาชิ้นส่วน cell ด้านใน
             if item:IsA("Model") or item:IsA("Folder") then
                 for _, cell in ipairs(item:GetChildren()) do
                     if cell:IsA("BasePart") then
@@ -634,7 +630,7 @@ task.spawn(function()
                     pcall(function()
                         local r = States.CurrentRune
                         local targetPart = r:IsA("BasePart") and r or r:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart me then
+                        if targetPart then
                             myRoot.Velocity = Vector3.new(0, 0, 0)
                             myRoot.RotVelocity = Vector3.new(0, 0, 0)
                             myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2.0, 0))

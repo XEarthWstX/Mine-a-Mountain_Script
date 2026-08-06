@@ -1,61 +1,241 @@
+--[[
+	ReplicatedStorage Dumper - ดึง/Backup ทุกอย่างใน ReplicatedStorage หรือ Service ใดก็ได้
+	วางใน ServerScriptService หรือ ReplicatedStorage
+]]
+
+local ReplicatedStorageDumper = {}
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+
+-- ตั้งค่า
+ReplicatedStorageDumper.Config = {
+	MaxDepth = 50,              -- ความลึกสูงสุดของ hierarchy
+	SaveScripts = true,         -- บันทึก Source code ของ Script/ModuleScript/LocalScript
+	SaveValues = true,          -- บันทึก Value ของ Value objects
+	SaveAttributes = true,      -- บันทึก Attributes
+	IncludeRobloxLocked = false -- ข้าม RobloxLocked instances
 }
-/* Code Viewer */
-.code-box {
-    background: #07090e;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 16px;
-    font-family: var(--font-code);
-    font-size: 0.82rem;
-    color: #39adb5;
-    height: 460px;
-    overflow: auto;
-    white-space: pre;
-    line-height: 1.5;
+
+-- Properties ที่จะบันทึกตาม ClassName
+local CLASS_PROPERTIES = {
+	Script = {"Source", "Enabled", "RunContext"},
+	ModuleScript = {"Source"},
+	LocalScript = {"Source", "Enabled", "RunContext"},
+	RemoteEvent = {},
+	RemoteFunction = {},
+	BindableEvent = {},
+	BindableFunction = {},
+	Folder = {},
+	
+	-- Value Objects
+	StringValue = {"Value"},
+	IntValue = {"Value"},
+	BoolValue = {"Value"},
+	NumberValue = {"Value"},
+	Color3Value = {"Value"},
+	Vector3Value = {"Value"},
+	CFrameValue = {"Value"},
+	ObjectValue = {"Value"},
+	
+	-- UI
+	ScreenGui = {"Enabled", "ResetOnSpawn", "ZIndexBehavior"},
+	TextLabel = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position"},
+	TextButton = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position"},
+	Frame = {"BackgroundColor3", "BackgroundTransparency", "Size", "Position"},
+	
+	-- Parts
+	Part = {"Shape", "Size", "Position", "Orientation", "Color", "Material", "Transparency", "CanCollide", "Anchored"},
+	MeshPart = {"MeshId", "TextureID", "Size", "Position", "Orientation", "Color", "Material"},
+	
+	-- Other
+	Sound = {"SoundId", "Volume", "PlaybackSpeed", "Looped", "Playing"},
+	Animation = {"AnimationId"},
+	Decal = {"Texture"},
+	Texture = {"Texture"},
 }
-/* Lua Script Modal */
-.script-modal-box {
-    max-width: 850px;
-    width: 95%;
-    max-height: 85vh;
-    display: flex;
-    flex-direction: column;
-}
-/* Notification Toast */
-.toast-container {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    z-index: 10000;
-}
-.toast {
-    background: rgba(16, 22, 36, 0.95);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--primary);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-    padding: 12px 20px;
-    border-radius: var(--radius-sm);
-    font-size: 0.85rem;
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    animation: slideIn 0.3s forwards;
-}
-@keyframes slideIn {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-/* Utility Badges */
-.badge-tag {
-    display: inline-block;
-    padding: 2px 8px;
-    background: rgba(0, 240, 255, 0.1);
-    color: var(--primary);
-    border-radius: 4px;
-    font-size: 0.72rem;
-    font-weight: 600;
-}
+
+-- ============================================
+-- HELPER: ดึง Properties ของ Instance
+-- ============================================
+
+local function getProperties(instance)
+	local className = instance.ClassName
+	local props = CLASS_PROPERTIES[className] or {"Name", "ClassName"}
+	local data = {
+		Name = instance.Name,
+		ClassName = className
+	}
+	
+	-- ดึง properties ที่กำหนดไว้
+	for _, propName in ipairs(props) do
+		local success, value = pcall(function()
+			return instance[propName]
+		end)
+		if success then
+			-- แปลงค่าที่ไม่สามารถ JSON encode ได้
+			if typeof(value) == "Instance" then
+				data[propName] = value:GetFullName()
+			elseif typeof(value) == "Color3" then
+				data[propName] = {R = value.R, G = value.G, B = value.B, _type = "Color3"}
+			elseif typeof(value) == "Vector3" then
+				data[propName] = {X = value.X, Y = value.Y, Z = value.Z, _type = "Vector3"}
+			elseif typeof(value) == "CFrame" then
+				local pos = value.Position
+				data[propName] = {
+					X = pos.X, Y = pos.Y, Z = pos.Z,
+					_type = "CFrame"
+				}
+			elseif typeof(value) == "EnumItem" then
+				data[propName] = tostring(value)
+			elseif typeof(value) == "BrickColor" then
+				data[propName] = tostring(value)
+			else
+				data[propName] = value
+			end
+		end
+	end
+	
+	-- ดึง Attributes
+	if ReplicatedStorageDumper.Config.SaveAttributes then
+		local attrs = instance:GetAttributes()
+		if next(attrs) then
+			data._attributes = attrs
+		end
+	end
+	
+	return data
+end
+
+-- ============================================
+-- CORE: Recursive Dump
+-- ============================================
+
+function ReplicatedStorageDumper.dumpInstance(instance, depth)
+	depth = depth or 0
+	if depth > ReplicatedStorageDumper.Config.MaxDepth then
+		return {Name = instance.Name, ClassName = instance.ClassName, _truncated = true}
+	end
+	
+	local data = getProperties(instance)
+	
+	-- ดึง Children แบบ recursive
+	local children = instance:GetChildren()
+	if #children > 0 then
+		data._children = {}
+		for _, child in ipairs(children) do
+			-- ข้าม RobloxLocked ถ้าตั้งค่าไว้
+			if not ReplicatedStorageDumper.Config.IncludeRobloxLocked then
+				local success, isLocked = pcall(function()
+					return child.RobloxLocked
+				end)
+				if success and isLocked then
+					continue
+				end
+			end
+			
+			table.insert(data._children, ReplicatedStorageDumper.dumpInstance(child, depth + 1))
+		end
+	end
+	
+	return data
+end
+
+-- ============================================
+-- EXPORT: แปลงเป็น JSON / File
+-- ============================================
+
+function ReplicatedStorageDumper.toJSON(data, pretty)
+	pretty = pretty ~= false
+	local success, result = pcall(function()
+		return HttpService:JSONEncode(data)
+	end)
+	
+	if success then
+		if pretty then
+			-- Format เบื้องต้น
+			result = result:gsub("},", "},\n"):gsub("%],", "%],\n")
+		end
+		return result
+	else
+		warn("[ReplicatedStorageDumper] JSON Encode failed: " .. tostring(result))
+		return nil
+	end
+end
+
+function ReplicatedStorageDumper.saveToFile(data, filename)
+	filename = filename or ("ReplicatedStorage_Dump_" .. os.time())
+	local json = ReplicatedStorageDumper.toJSON(data, false)
+	
+	if not json then return false end
+	
+	if RunService:IsStudio() then
+		-- สร้าง Folder ใน ServerStorage
+		local folder = game.ServerStorage:FindFirstChild("StorageDumps")
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = "StorageDumps"
+			folder.Parent = game.ServerStorage
+		end
+		
+		-- สร้าง ModuleScript เก็บ JSON
+		local module = Instance.new("ModuleScript")
+		module.Name = filename
+		module.Source = "-- ReplicatedStorage Dump\n" ..
+			"-- Generated: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n" ..
+			"-- Size: " .. tostring(#json) .. " chars\n" ..
+			"return [[" .. json .. "]]"
+		module.Parent = folder
+		
+		print(string.format("[ReplicatedStorageDumper] ✅ Saved: ServerStorage.StorageDumps.%s (%d chars)", filename, #json))
+		return true
+	else
+		print("[ReplicatedStorageDumper] ⚠️ Live Game - JSON Length: " .. tostring(#json))
+		return json
+	end
+end
+
+function ReplicatedStorageDumper.printDump(data, maxPrintLength)
+	maxPrintLength = maxPrintLength or 8000
+	local json = ReplicatedStorageDumper.toJSON(data, true)
+	if json then
+		if #json > maxPrintLength then
+			print("========== REPLICATEDSTORAGE DUMP (Truncated) ==========")
+			print(json:sub(1, maxPrintLength))
+			print("... [Truncated - Total: " .. tostring(#json) .. " chars]")
+		else
+			print("========== REPLICATEDSTORAGE DUMP ==========")
+			print(json)
+		end
+		print("==========================================")
+	end
+end
+
+-- ============================================
+-- QUICK FUNCTIONS
+-- ============================================
+
+function ReplicatedStorageDumper.dumpReplicatedStorage()
+	local rs = game:GetService("ReplicatedStorage")
+	print("[ReplicatedStorageDumper] 🔍 Dumping ReplicatedStorage...")
+	local data = ReplicatedStorageDumper.dumpInstance(rs)
+	data._dumpInfo = {
+		timestamp = os.time(),
+		date = os.date("%Y-%m-%d %H:%M:%S"),
+		totalInstances = #rs:GetDescendants()
+	}
+	return data
+end
+
+function ReplicatedStorageDumper.dumpService(serviceName)
+	local service = game:GetService(serviceName)
+	print(string.format("[ReplicatedStorageDumper] 🔍 Dumping %s...", serviceName))
+	local data = ReplicatedStorageDumper.dumpInstance(service)
+	data._dumpInfo = {
+		service = serviceName,
+		timestamp = os.time(),
+		totalInstances = #service:GetDescendants()
+	}
+	return data
+end
+
+return ReplicatedStorageDumper

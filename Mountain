@@ -1,568 +1,449 @@
---[[
-    ╔══════════════════════════════════════════════════════════════╗
-    ║           Delta Executor - ReplicatedStorage Dumper           ║
-    ║                    Loadstring Ready v2.1                     ║
-    ║              [Multi-Language TH/EN & File Path Info]         ║
-    ╚══════════════════════════════════════════════════════════════╝
-]]
+-- [[ Roblox Multi-Language Utility Hub ]]
+-- Place this script inside StarterPlayer -> StarterPlayerScripts or StarterGui
 
--- ============================================
--- EXECUTOR CHECK
--- ============================================
-if not writefile then
-    warn("❌ สคริปต์นี้ต้องใช้กับ Executor ที่มี file API (Delta, Fluxus, etc.)")
-    return
-end
-
--- ============================================
--- SERVICES
--- ============================================
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
 
--- ============================================
--- SECTION 1: CONFIG & TRANSLATIONS
--- ============================================
-local Config = {
-    Language            = "TH",               -- "TH" หรือ "EN"
-    MaxDepth            = 50,
-    SaveScripts         = true,
-    SaveValues          = true,
-    SaveAttributes      = true,
-    IncludeRobloxLocked = false,
-    OutputFolder        = "Delta_Dumps/",     -- โฟลเดอร์ใน executor workspace
-    AutoSave            = true,
-    CopyToClipboard     = false,
-    UseConsole          = rconsoleprint ~= nil
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- -------------------------------------------------------------
+-- 1. LOCALIZATION SYSTEM (คลังภาษา)
+-- -------------------------------------------------------------
+local currentLang = "TH" -- Default Language
+
+local Locales = {
+	TH = {
+		WelcomeTitle = "ยินดีต้อนรับ",
+		WelcomeSub = "กรุณาเลือกภาษาเพื่อเริ่มต้นใช้งาน",
+		ConfirmBtn = "ยืนยัน",
+		HubTitle = "ระบบควบคุมตัวละคร",
+		TabPlayer = "👤 ตัวละคร",
+		TabWorld = "🌍 โลก & แมพ",
+		TabSettings = "⚙️ ตั้งค่า",
+		
+		WalkSpeedLabel = "ความเร็วการเดิน (WalkSpeed)",
+		JumpPowerLabel = "แรงกระโดด (JumpPower)",
+		FovLabel = "ระยะมุมมอง (FOV)",
+		NightVisionLabel = "โหมดมองในที่มืด (Night Vision)",
+		TpSpawnLabel = "วาร์ปกลับจุดเกิด (Teleport to Spawn)",
+		ResetCharLabel = "รีเซ็ตตัวละคร (Reset Character)",
+		
+		ToggleOn = "เปิด",
+		ToggleOff = "ปิด",
+		Execute = "ทำงาน",
+		Apply = "ปรับใช้",
+		LanguageChanged = "เปลี่ยนภาษาเรียบร้อย!"
+	},
+	EN = {
+		WelcomeTitle = "Welcome",
+		WelcomeSub = "Please select your preferred language",
+		ConfirmBtn = "Confirm",
+		HubTitle = "Character Control Hub",
+		TabPlayer = "👤 Character",
+		TabWorld = "🌍 World & Map",
+		TabSettings = "⚙️ Settings",
+		
+		WalkSpeedLabel = "Walk Speed",
+		JumpPowerLabel = "Jump Power",
+		FovLabel = "Field of View (FOV)",
+		NightVisionLabel = "Night Vision Mode",
+		TpSpawnLabel = "Teleport to Spawn",
+		ResetCharLabel = "Reset Character",
+		
+		ToggleOn = "ON",
+		ToggleOff = "OFF",
+		Execute = "Execute",
+		Apply = "Apply",
+		LanguageChanged = "Language changed successfully!"
+	}
 }
 
--- ระบบภาษา (I18N)
-local I18N = {
-    TH = {
-        Title            = "📦 Delta Dumper v2.1",
-        StatusReady      = "สถานะ: พร้อมใช้งาน",
-        StatusDumping    = "กำลัง ดั้มป์ %s...",
-        StatusSuccess    = "✅ ดั้มป์ %s สำเร็จ!",
-        DumpRS           = "Dump ReplicatedStorage",
-        DumpWS           = "Dump Workspace",
-        DumpPlayer       = "Dump LocalPlayer",
-        DumpGui          = "Dump StarterGui",
-        CopyJSON         = "📋 คัดลอก JSON ล่าสุด",
-        ListFiles        = "📁 รายชื่อไฟล์ดั้มป์",
-        ClearConsole     = "🧹 ล้าง คอนโซล",
-        ToggleAutoSave   = "⚙️ ออโต้เซฟ: ",
-        FileLocationBtn  = "📂 ไฟล์เก็บที่ไหน?",
-        Copied           = "📋 คัดลอกลง Clipboard แล้ว!",
-        NothingToCopy    = "⚠️ ไม่มีข้อมูล JSON ให้คัดลอก",
-        ConsoleCleared   = "ล้างคอนโซลเรียบร้อย",
-        PathInfoTitle    = "ℹ️ ตำแหน่งที่เก็บไฟล์ Dump",
-        PathInfoPC       = "🖥️ PC:\n[Executor Folder]/workspace/Delta_Dumps/",
-        PathInfoMobile   = "📱 Mobile (Delta):\nInternal Storage -> Delta -> workspace -> Delta_Dumps/",
-        Close            = "ปิด",
-        CopyPath         = "📋 คัดลอก Path",
-        LangBtn          = "🇹🇭 TH"
-    },
-    EN = {
-        Title            = "📦 Delta Dumper v2.1",
-        StatusReady      = "Status: Ready",
-        StatusDumping    = "Dumping %s...",
-        StatusSuccess    = "✅ %s dumped successfully!",
-        DumpRS           = "Dump ReplicatedStorage",
-        DumpWS           = "Dump Workspace",
-        DumpPlayer       = "Dump LocalPlayer",
-        DumpGui          = "Dump StarterGui",
-        CopyJSON         = "📋 Copy Last JSON",
-        ListFiles        = "📁 List Dump Files",
-        ClearConsole     = "🧹 Clear Console",
-        ToggleAutoSave   = "⚙️ AutoSave: ",
-        FileLocationBtn  = "📂 Where are files?",
-        Copied           = "📋 Copied to Clipboard!",
-        NothingToCopy    = "⚠️ Nothing to copy",
-        ConsoleCleared   = "Console cleared",
-        PathInfoTitle    = "ℹ️ Storage Path Info",
-        PathInfoPC       = "🖥️ PC:\n[Executor Folder]/workspace/Delta_Dumps/",
-        PathInfoMobile   = "📱 Mobile (Delta):\nInternal Storage -> Delta -> workspace -> Delta_Dumps/",
-        Close            = "Close",
-        CopyPath         = "📋 Copy Path",
-        LangBtn          = "🇬🇧 EN"
-    }
-}
-
-local function getText(key)
-    local lang = Config.Language or "TH"
-    return I18N[lang] and I18N[lang][key] or key
+-- Helper function for Smooth Tweens
+local function tween(object, info, properties)
+	local t = TweenService:Create(object, TweenInfo.new(unpack(info)), properties)
+	t:Play()
+	return t
 end
 
--- สร้างโฟลเดอร์ถ้ายังไม่มี
-if makefolder and not isfolder(Config.OutputFolder) then
-    makefolder(Config.OutputFolder)
+-- -------------------------------------------------------------
+-- 2. GUI CREATION (สร้าง UI ด้วยโค้ด)
+-- -------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MultiLangHubGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+-- =============================================================
+-- A. LANGUAGE SELECTION FRAME (หน้าเลือกภาษา)
+-- =============================================================
+local langFrame = Instance.new("Frame")
+langFrame.Name = "LanguageFrame"
+langFrame.Size = UDim2.new(0, 380, 0, 260)
+langFrame.Position = UDim2.new(0.5, -190, 0.5, -130)
+langFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 32)
+langFrame.BorderSizePixel = 0
+langFrame.Parent = screenGui
+
+local langCorner = Instance.new("UICorner")
+langCorner.CornerRadius = UDim.new(0, 14)
+langCorner.Parent = langFrame
+
+local langStroke = Instance.new("UIStroke")
+langStroke.Color = Color3.fromRGB(60, 64, 75)
+langStroke.Thickness = 1.5
+langStroke.Parent = langFrame
+
+local langTitle = Instance.new("TextLabel")
+langTitle.Size = UDim2.new(1, 0, 0, 40)
+langTitle.Position = UDim2.new(0, 0, 0, 15)
+langTitle.BackgroundTransparency = 1
+langTitle.Font = Enum.Font.GothamBold
+langTitle.TextSize = 22
+langTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+langTitle.Text = "ยินดีต้อนรับ / Welcome"
+langTitle.Parent = langFrame
+
+local langSub = Instance.new("TextLabel")
+langSub.Size = UDim2.new(1, -40, 0, 20)
+langSub.Position = UDim2.new(0, 20, 0, 50)
+langSub.BackgroundTransparency = 1
+langSub.Font = Enum.Font.Gotham
+langSub.TextSize = 13
+langSub.TextColor3 = Color3.fromRGB(160, 165, 175)
+langSub.Text = "กรุณาเลือกภาษาเพื่อเริ่มต้น / Select a language"
+langSub.Parent = langFrame
+
+-- Option Buttons (TH & EN)
+local selectedLang = "TH"
+
+local btnTH = Instance.new("TextButton")
+btnTH.Size = UDim2.new(0, 155, 0, 45)
+btnTH.Position = UDim2.new(0.5, -165, 0, 95)
+btnTH.BackgroundColor3 = Color3.fromRGB(0, 180, 216)
+btnTH.Font = Enum.Font.GothamMedium
+btnTH.TextSize = 16
+btnTH.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnTH.Text = "🇹🇭 ภาษาไทย"
+btnTH.Parent = langFrame
+
+local btnTHCorner = Instance.new("UICorner")
+btnTHCorner.CornerRadius = UDim.new(0, 10)
+btnTHCorner.Parent = btnTH
+
+local btnEN = Instance.new("TextButton")
+btnEN.Size = UDim2.new(0, 155, 0, 45)
+btnEN.Position = UDim2.new(0.5, 10, 0, 95)
+btnEN.BackgroundColor3 = Color3.fromRGB(35, 38, 46)
+btnEN.Font = Enum.Font.GothamMedium
+btnEN.TextSize = 16
+btnEN.TextColor3 = Color3.fromRGB(180, 185, 195)
+btnEN.Text = "🇬🇧 English"
+btnEN.Parent = langFrame
+
+local btnENCorner = Instance.new("UICorner")
+btnENCorner.CornerRadius = UDim.new(0, 10)
+btnENCorner.Parent = btnEN
+
+-- Confirm Button
+local confirmBtn = Instance.new("TextButton")
+confirmBtn.Size = UDim2.new(1, -40, 0, 45)
+confirmBtn.Position = UDim2.new(0, 20, 1, -65)
+confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 201, 167)
+confirmBtn.Font = Enum.Font.GothamBold
+confirmBtn.TextSize = 16
+confirmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmBtn.Text = "ยืนยัน / Confirm"
+confirmBtn.Parent = langFrame
+
+local confirmCorner = Instance.new("UICorner")
+confirmCorner.CornerRadius = UDim.new(0, 10)
+confirmCorner.Parent = confirmBtn
+
+-- Language Selection Logic
+btnTH.MouseButton1Click:Connect(function()
+	selectedLang = "TH"
+	tween(btnTH, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
+	tween(btnEN, {0.2}, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
+end)
+
+btnEN.MouseButton1Click:Connect(function()
+	selectedLang = "EN"
+	tween(btnEN, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
+	tween(btnTH, {0.2}, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
+end)
+
+-- =============================================================
+-- B. MAIN DASHBOARD HUB (หน้าเมนูหลัก)
+-- =============================================================
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 520, 0, 320)
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -160)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = false
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 14)
+mainCorner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(45, 48, 58)
+mainStroke.Thickness = 1.5
+mainStroke.Parent = mainFrame
+
+-- Topbar
+local topbar = Instance.new("Frame")
+topbar.Size = UDim2.new(1, 0, 0, 45)
+topbar.BackgroundTransparency = 1
+topbar.Parent = mainFrame
+
+local hubTitleLabel = Instance.new("TextLabel")
+hubTitleLabel.Size = UDim2.new(1, -60, 1, 0)
+hubTitleLabel.Position = UDim2.new(0, 20, 0, 0)
+hubTitleLabel.BackgroundTransparency = 1
+hubTitleLabel.Font = Enum.Font.GothamBold
+hubTitleLabel.TextSize = 16
+hubTitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+hubTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+hubTitleLabel.Parent = topbar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -38, 0.5, -15)
+closeBtn.BackgroundColor3 = Color3.fromRGB(235, 87, 87)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Text = "✕"
+closeBtn.Parent = topbar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeBtn
+
+closeBtn.MouseButton1Click:Connect(function()
+	mainFrame.Visible = false
+	langFrame.Visible = true
+end)
+
+-- Sidebar (Left)
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 150, 1, -45)
+sidebar.Position = UDim2.new(0, 0, 0, 45)
+sidebar.BackgroundColor3 = Color3.fromRGB(26, 28, 35)
+sidebar.BorderSizePixel = 0
+sidebar.Parent = mainFrame
+
+local sidebarCorner = Instance.new("UICorner")
+sidebarCorner.CornerRadius = UDim.new(0, 14)
+sidebarCorner.Parent = sidebar
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.Padding = UDim.new(0, 6)
+tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+tabLayout.Parent = sidebar
+
+local tabPadding = Instance.new("UIPadding")
+tabPadding.PaddingTop = UDim.new(0, 10)
+tabPadding.Parent = sidebar
+
+-- Content Container (Right)
+local container = Instance.new("Frame")
+container.Size = UDim2.new(1, -165, 1, -55)
+container.Position = UDim2.new(0, 155, 0, 45)
+container.BackgroundTransparency = 1
+container.Parent = mainFrame
+
+local contentLayout = Instance.new("UIListLayout")
+contentLayout.Padding = UDim.new(0, 10)
+contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+contentLayout.Parent = container
+
+-- Helper Function to Create UI Items
+local function createFunctionRow(labelText, actionType, callback)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -10, 0, 42)
+	row.BackgroundColor3 = Color3.fromRGB(30, 33, 42)
+	row.Parent = container
+	
+	local rowCorner = Instance.new("UICorner")
+	rowCorner.CornerRadius = UDim.new(0, 8)
+	rowCorner.Parent = row
+	
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.65, -10, 1, 0)
+	label.Position = UDim2.new(0, 12, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamMedium
+	label.TextSize = 13
+	label.TextColor3 = Color3.fromRGB(220, 225, 235)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = labelText
+	label.Parent = row
+	
+	if actionType == "Button" then
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.3, 0, 0, 28)
+		btn.Position = UDim2.new(0.68, 0, 0.5, -14)
+		btn.BackgroundColor3 = Color3.fromRGB(0, 180, 216)
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 12
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.Text = Locales[currentLang].Execute
+		btn.Parent = row
+		
+		local btnC = Instance.new("UICorner")
+		btnC.CornerRadius = UDim.new(0, 6)
+		btnC.Parent = btn
+		
+		btn.MouseButton1Click:Connect(function()
+			callback()
+		end)
+	elseif actionType == "Toggle" then
+		local toggled = false
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.3, 0, 0, 28)
+		btn.Position = UDim2.new(0.68, 0, 0.5, -14)
+		btn.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 12
+		btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+		btn.Text = Locales[currentLang].ToggleOff
+		btn.Parent = row
+		
+		local btnC = Instance.new("UICorner")
+		btnC.CornerRadius = UDim.new(0, 6)
+		btnC.Parent = btn
+		
+		btn.MouseButton1Click:Connect(function()
+			toggled = not toggled
+			if toggled then
+				tween(btn, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 201, 167), TextColor3 = Color3.fromRGB(255, 255, 255)})
+				btn.Text = Locales[currentLang].ToggleOn
+			else
+				tween(btn, {0.2}, {BackgroundColor3 = Color3.fromRGB(50, 55, 65), TextColor3 = Color3.fromRGB(200, 200, 200)})
+				btn.Text = Locales[currentLang].ToggleOff
+			end
+			callback(toggled)
+		end)
+	elseif actionType == "Input" then
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(0.3, 0, 0, 28)
+		box.Position = UDim2.new(0.68, 0, 0.5, -14)
+		box.BackgroundColor3 = Color3.fromRGB(40, 44, 55)
+		box.Font = Enum.Font.Gotham
+		box.TextSize = 13
+		box.TextColor3 = Color3.fromRGB(255, 255, 255)
+		box.PlaceholderText = "Val"
+		box.Text = ""
+		box.Parent = row
+		
+		local boxC = Instance.new("UICorner")
+		boxC.CornerRadius = UDim.new(0, 6)
+		boxC.Parent = box
+		
+		box.FocusLost:Connect(function(enterPressed)
+			if enterPressed then
+				local num = tonumber(box.Text)
+				if num then
+					callback(num)
+				end
+			end
+		end)
+	end
+	return row
 end
 
--- ตาราง Properties ตาม ClassName
-local CLASS_PROPERTIES = {
-    Script       = {"Source", "Enabled", "RunContext"},
-    ModuleScript = {"Source"},
-    LocalScript  = {"Source", "Enabled", "RunContext"},
-    RemoteEvent  = {}, RemoteFunction = {}, BindableEvent = {}, BindableFunction = {},
-    Folder       = {}, Configuration  = {}, Model         = {},
-    StringValue  = {"Value"}, IntValue     = {"Value"}, BoolValue    = {"Value"},
-    NumberValue  = {"Value"}, Color3Value  = {"Value"}, Vector3Value = {"Value"},
-    CFrameValue  = {"Value"}, ObjectValue  = {"Value"},
-    ScreenGui    = {"Enabled", "ResetOnSpawn", "ZIndexBehavior"},
-    TextLabel    = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position", "AnchorPoint"},
-    TextButton   = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position", "AnchorPoint"},
-    TextBox      = {"Text", "PlaceholderText", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position"},
-    Frame        = {"BackgroundColor3", "BackgroundTransparency", "Size", "Position", "AnchorPoint"},
-    ScrollingFrame = {"CanvasSize", "ScrollBarThickness", "BackgroundColor3", "Size", "Position"},
-    ImageLabel   = {"Image", "ImageColor3", "Size", "Position"},
-    ImageButton  = {"Image", "ImageColor3", "Size", "Position"},
-    Part         = {"Shape", "Size", "Position", "Orientation", "Color", "Material", "Transparency", "CanCollide", "Anchored"},
-    MeshPart     = {"MeshId", "TextureID", "Size", "Position", "Orientation", "Color", "Material", "Transparency"},
-    Sound        = {"SoundId", "Volume", "PlaybackSpeed", "Looped", "Playing"},
-    Animation    = {"AnimationId"}, Decal = {"Texture"}, Texture = {"Texture"}
-}
-
--- ============================================
--- SECTION 2: HELPER
--- ============================================
-local function log(msg, color)
-    if Config.UseConsole and rconsoleprint then
-        if color then
-            rconsoleprint("[" .. msg .. "]\n")
-        else
-            rconsoleprint(msg .. "\n")
-        end
-    else
-        print(msg)
-    end
+-- Refresh Language Function
+local function applyLanguage(langKey)
+	currentLang = langKey
+	local l = Locales[langKey]
+	
+	hubTitleLabel.Text = l.HubTitle
+	
+	-- Clear Container
+	for _, child in ipairs(container:GetChildren()) do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+	
+	-- Populate Functions based on selected language
+	-- 1. WalkSpeed
+	createFunctionRow(l.WalkSpeedLabel, "Input", function(val)
+		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+			player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = val
+		end
+	end)
+	
+	-- 2. JumpPower
+	createFunctionRow(l.JumpPowerLabel, "Input", function(val)
+		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+			local hum = player.Character:FindFirstChildOfClass("Humanoid")
+			hum.UseJumpPower = true
+			hum.JumpPower = val
+		end
+	end)
+	
+	-- 3. FOV Adjuster
+	createFunctionRow(l.FovLabel, "Input", function(val)
+		Workspace.CurrentCamera.FieldOfView = math.clamp(val, 30, 120)
+	end)
+	
+	-- 4. Night Vision Toggle
+	createFunctionRow(l.NightVisionLabel, "Toggle", function(state)
+		if state then
+			Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+			Lighting.Brightness = 3
+		else
+			Lighting.Ambient = Color3.fromRGB(128, 128, 128)
+			Lighting.Brightness = 1
+		end
+	end)
+	
+	-- 5. Teleport Spawn
+	createFunctionRow(l.TpSpawnLabel, "Button", function()
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local spawnLocation = Workspace:FindFirstChildOfClass("SpawnLocation")
+			if spawnLocation then
+				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
+			else
+				player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
+			end
+		end
+	end)
+	
+	-- 6. Reset Character
+	createFunctionRow(l.ResetCharLabel, "Button", function()
+		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+			player.Character:FindFirstChildOfClass("Humanoid").Health = 0
+		end
+	end)
 end
 
-local function getProperties(instance)
-    local className = instance.ClassName
-    local props = CLASS_PROPERTIES[className] or {"Name", "ClassName"}
-    local data = {
-        Name      = instance.Name,
-        ClassName = className
-    }
-    
-    for _, propName in ipairs(props) do
-        local success, value = pcall(function() return instance[propName] end)
-        if success then
-            local valType = typeof(value)
-            if valType == "Instance" then
-                data[propName] = value:GetFullName()
-            elseif valType == "Color3" then
-                data[propName] = {R = value.R, G = value.G, B = value.B, _type = "Color3"}
-            elseif valType == "Vector3" then
-                data[propName] = {X = value.X, Y = value.Y, Z = value.Z, _type = "Vector3"}
-            elseif valType == "Vector2" then
-                data[propName] = {X = value.X, Y = value.Y, _type = "Vector2"}
-            elseif valType == "CFrame" then
-                local pos = value.Position
-                local rot = {value:ToEulerAnglesXYZ()}
-                data[propName] = {X = pos.X, Y = pos.Y, Z = pos.Z, RX = rot[1], RY = rot[2], RZ = rot[3], _type = "CFrame"}
-            elseif valType == "UDim2" then
-                data[propName] = {ScaleX = value.X.Scale, OffsetX = value.X.Offset, ScaleY = value.Y.Scale, OffsetY = value.Y.Offset, _type = "UDim2"}
-            elseif valType == "EnumItem" or valType == "BrickColor" then
-                data[propName] = tostring(value)
-            elseif valType == "NumberRange" then
-                data[propName] = {Min = value.Min, Max = value.Max, _type = "NumberRange"}
-            else
-                data[propName] = value
-            end
-        end
-    end
-    
-    if Config.SaveAttributes then
-        local attrs = instance:GetAttributes()
-        if next(attrs) ~= nil then data._attributes = attrs end
-    end
-    
-    return data
-end
+-- Confirm Button Click
+confirmBtn.MouseButton1Click:Connect(function()
+	currentLang = selectedLang
+	applyLanguage(currentLang)
+	
+	-- Smooth Fade Out Language Screen & Fade In Main Hub
+	tween(langFrame, {0.3}, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
+	task.wait(0.25)
+	langFrame.Visible = false
+	
+	mainFrame.Size = UDim2.new(0, 0, 0, 0)
+	mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	mainFrame.Visible = true
+	tween(mainFrame, {0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out}, {
+		Size = UDim2.new(0, 520, 0, 320),
+		Position = UDim2.new(0.5, -260, 0.5, -160)
+	})
+end)
 
--- ============================================
--- SECTION 3: CORE - dumpInstance
--- ============================================
-local function dumpInstance(instance, depth)
-    depth = depth or 0
-    if depth > Config.MaxDepth then
-        return { Name = instance.Name, ClassName = instance.ClassName, _truncated = true, _reason = "MaxDepth: " .. Config.MaxDepth }
-    end
-    
-    local data = getProperties(instance)
-    local children = instance:GetChildren()
-    
-    if #children > 0 then
-        data._children = {}
-        for _, child in ipairs(children) do
-            if not Config.IncludeRobloxLocked then
-                local ok, isLocked = pcall(function() return child.RobloxLocked end)
-                if ok and isLocked then continue end
-            end
-            table.insert(data._children, dumpInstance(child, depth + 1))
-        end
-    end
-    
-    return data
-end
-
--- ============================================
--- SECTION 4: EXPORT
--- ============================================
-local LastJSON = ""
-
-local function toJSON(data, pretty)
-    pretty = pretty ~= false
-    local success, result = pcall(function() return HttpService:JSONEncode(data) end)
-    if success then
-        if pretty then
-            result = result:gsub("([%{%}%[%]%,])", "%1\n"):gsub("\":", "\": "):gsub("\n\n+", "\n")
-        end
-        return result
-    else
-        log("❌ JSON Encode failed: " .. tostring(result))
-        return nil
-    end
-end
-
-local function saveToFile(data, filename)
-    filename = filename or ("Dump_" .. os.time() .. ".json")
-    if not string.match(filename, "%.json$") then filename = filename .. ".json" end
-    
-    local filepath = Config.OutputFolder .. filename
-    local json = toJSON(data, false)
-    if not json then return false end
-    
-    LastJSON = json
-    writefile(filepath, json)
-    log("✅ Saved: " .. filepath .. " (" .. tostring(#json) .. " chars)")
-    return true
-end
-
-local function copyLastJSON()
-    if LastJSON ~= "" and setclipboard then
-        setclipboard(LastJSON)
-        log("📋 Copied to clipboard!")
-        return true
-    else
-        log("⚠️ Nothing to copy")
-        return false
-    end
-end
-
-local function listDumps()
-    if not listfiles then log("❌ listfiles not supported") return {} end
-    local files = listfiles(Config.OutputFolder)
-    log("📁 Files in " .. Config.OutputFolder .. ":")
-    for _, f in ipairs(files) do log("   • " .. f) end
-    return files
-end
-
--- ============================================
--- SECTION 5: UI SYSTEM
--- ============================================
-local UI = {}
-local Elements = {}
-
-local function updateAllTexts()
-    if Elements.Title then Elements.Title.Text = getText("Title") end
-    if Elements.LangBtn then Elements.LangBtn.Text = getText("LangBtn") end
-    if Elements.StatusLabel then Elements.StatusLabel.Text = getText("StatusReady") end
-    if Elements.BtnRS then Elements.BtnRS.Text = getText("DumpRS") end
-    if Elements.BtnWS then Elements.BtnWS.Text = getText("DumpWS") end
-    if Elements.BtnPlayer then Elements.BtnPlayer.Text = getText("DumpPlayer") end
-    if Elements.BtnGui then Elements.BtnGui.Text = getText("DumpGui") end
-    if Elements.BtnCopy then Elements.BtnCopy.Text = getText("CopyJSON") end
-    if Elements.BtnList then Elements.BtnList.Text = getText("ListFiles") end
-    if Elements.BtnClear then Elements.BtnClear.Text = getText("ClearConsole") end
-    if Elements.BtnAutoSave then Elements.BtnAutoSave.Text = getText("ToggleAutoSave") .. tostring(Config.AutoSave) end
-    if Elements.BtnPathInfo then Elements.BtnPathInfo.Text = getText("FileLocationBtn") end
-    if Elements.InfoLabel then Elements.InfoLabel.Text = "Path: workspace/" .. Config.OutputFolder end
-end
-
-local function updateStatus(text)
-    if Elements.StatusLabel then
-        Elements.StatusLabel.Text = text
-    end
-    log(text)
-end
-
-local function createButton(parent, text, pos, color, callback)
-    local btn = Instance.new("TextButton")
-    btn.Text = text
-    btn.Size = UDim2.new(0, 170, 0, 36)
-    btn.Position = pos
-    btn.BackgroundColor3 = color or Color3.fromRGB(40, 40, 60)
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamSemibold
-    btn.TextSize = 12
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = btn
-    
-    btn.MouseButton1Click:Connect(function() pcall(callback) end)
-    return btn
-end
-
--- หน้าต่างป็อปอัปบอกตำแหน่งที่เก็บไฟล์
-local function showPathModal(parentScreen)
-    local modal = Instance.new("Frame")
-    modal.Name = "PathModal"
-    modal.Size = UDim2.new(0, 340, 0, 240)
-    modal.Position = UDim2.new(0.5, -170, 0.5, -120)
-    modal.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
-    modal.BorderSizePixel = 0
-    modal.ZIndex = 10
-    modal.Parent = parentScreen
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = modal
-    
-    local title = Instance.new("TextLabel")
-    title.Text = getText("PathInfoTitle")
-    title.Size = UDim2.new(1, -20, 0, 35)
-    title.Position = UDim2.new(0, 10, 0, 5)
-    title.BackgroundTransparency = 1
-    title.TextColor3 = Color3.fromRGB(100, 255, 218)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 14
-    title.ZIndex = 11
-    title.Parent = modal
-    
-    local desc = Instance.new("TextLabel")
-    desc.Text = getText("PathInfoMobile") .. "\n\n" .. getText("PathInfoPC")
-    desc.Size = UDim2.new(1, -20, 0, 130)
-    desc.Position = UDim2.new(0, 10, 0, 45)
-    desc.BackgroundTransparency = 1
-    desc.TextColor3 = Color3.fromRGB(220, 220, 240)
-    desc.Font = Enum.Font.Gotham
-    desc.TextSize = 11
-    desc.TextWrapped = true
-    desc.TextYAlignment = Enum.TextYAlignment.Top
-    desc.ZIndex = 11
-    desc.Parent = modal
-    
-    local copyBtn = createButton(modal, getText("CopyPath"), UDim2.new(0, 15, 1, -45), Color3.fromRGB(45, 85, 65), function()
-        if setclipboard then
-            setclipboard("workspace/" .. Config.OutputFolder)
-            updateStatus(getText("Copied"))
-        end
-    end)
-    copyBtn.Size = UDim2.new(0, 140, 0, 32)
-    copyBtn.ZIndex = 11
-    
-    local closeBtn = createButton(modal, getText("Close"), UDim2.new(1, -155, 1, -45), Color3.fromRGB(85, 45, 45), function()
-        modal:Destroy()
-    end)
-    closeBtn.Size = UDim2.new(0, 140, 0, 32)
-    closeBtn.ZIndex = 11
-end
-
-function UI:Init()
-    pcall(function()
-        local old = CoreGui:FindFirstChild("DeltaDumperUI")
-        if old then old:Destroy() end
-    end)
-    
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "DeltaDumperUI"
-    screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    
-    local success = pcall(function() screenGui.Parent = CoreGui end)
-    if not success then screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-    
-    -- Main Frame
-    local frame = Instance.new("Frame")
-    frame.Name = "MainFrame"
-    frame.Size = UDim2.new(0, 380, 0, 440)
-    frame.Position = UDim2.new(0.5, -190, 0.5, -220)
-    frame.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
-    frame.BorderSizePixel = 0
-    frame.Active = true
-    frame.Draggable = true
-    frame.Parent = screenGui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = frame
-    
-    -- Header
-    local header = Instance.new("Frame")
-    header.Size = UDim2.new(1, 0, 0, 44)
-    header.BackgroundColor3 = Color3.fromRGB(28, 28, 45)
-    header.BorderSizePixel = 0
-    header.Parent = frame
-    
-    local headerCorner = Instance.new("UICorner")
-    headerCorner.CornerRadius = UDim.new(0, 12)
-    headerCorner.Parent = header
-    
-    Elements.Title = Instance.new("TextLabel")
-    Elements.Title.Text = getText("Title")
-    Elements.Title.Size = UDim2.new(1, -120, 1, 0)
-    Elements.Title.Position = UDim2.new(0, 15, 0, 0)
-    Elements.Title.BackgroundTransparency = 1
-    Elements.Title.TextColor3 = Color3.fromRGB(100, 255, 218)
-    Elements.Title.Font = Enum.Font.GothamBold
-    Elements.Title.TextSize = 16
-    Elements.Title.TextXAlignment = Enum.TextXAlignment.Left
-    Elements.Title.Parent = header
-    
-    -- Language Switcher Button (ปุ่มสลับภาษา TH/EN)
-    Elements.LangBtn = Instance.new("TextButton")
-    Elements.LangBtn.Text = getText("LangBtn")
-    Elements.LangBtn.Size = UDim2.new(0, 65, 0, 28)
-    Elements.LangBtn.Position = UDim2.new(1, -110, 0, 8)
-    Elements.LangBtn.BackgroundColor3 = Color3.fromRGB(50, 60, 90)
-    Elements.LangBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Elements.LangBtn.Font = Enum.Font.GothamBold
-    Elements.LangBtn.TextSize = 12
-    Elements.LangBtn.BorderSizePixel = 0
-    Elements.LangBtn.Parent = header
-    
-    local langCorner = Instance.new("UICorner")
-    langCorner.CornerRadius = UDim.new(0, 6)
-    langCorner.Parent = Elements.LangBtn
-    
-    Elements.LangBtn.MouseButton1Click:Connect(function()
-        Config.Language = (Config.Language == "TH") and "EN" or "TH"
-        updateAllTexts()
-    end)
-    
-    -- Close Button
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Text = "✕"
-    closeBtn.Size = UDim2.new(0, 36, 0, 36)
-    closeBtn.Position = UDim2.new(1, -40, 0, 4)
-    closeBtn.BackgroundTransparency = 1
-    closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 16
-    closeBtn.Parent = header
-    closeBtn.MouseButton1Click:Connect(function() screenGui:Destroy() end)
-    
-    -- Status Label
-    Elements.StatusLabel = Instance.new("TextLabel")
-    Elements.StatusLabel.Text = getText("StatusReady")
-    Elements.StatusLabel.Size = UDim2.new(1, -20, 0, 22)
-    Elements.StatusLabel.Position = UDim2.new(0, 10, 0, 50)
-    Elements.StatusLabel.BackgroundTransparency = 1
-    Elements.StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
-    Elements.StatusLabel.Font = Enum.Font.Gotham
-    Elements.StatusLabel.TextSize = 12
-    Elements.StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    Elements.StatusLabel.Parent = frame
-    
-    -- Buttons Grid
-    local btnY = 78
-    
-    Elements.BtnRS = createButton(frame, getText("DumpRS"), UDim2.new(0, 10, 0, btnY), Color3.fromRGB(45, 55, 85), function()
-        updateStatus(string.format(getText("StatusDumping"), "ReplicatedStorage"))
-        local rs = game:GetService("ReplicatedStorage")
-        local data = {
-            Name = "ReplicatedStorage", ClassName = "ReplicatedStorage",
-            _dumpInfo = { timestamp = os.time(), date = os.date("%Y-%m-%d %H:%M:%S"), totalInstances = #rs:GetDescendants() },
-            _children = dumpInstance(rs)._children
-        }
-        if Config.AutoSave then saveToFile(data, "ReplicatedStorage_" .. os.time()) end
-        updateStatus(string.format(getText("StatusSuccess"), "ReplicatedStorage"))
-    end)
-    
-    Elements.BtnWS = createButton(frame, getText("DumpWS"), UDim2.new(0, 195, 0, btnY), Color3.fromRGB(45, 55, 85), function()
-        updateStatus(string.format(getText("StatusDumping"), "Workspace"))
-        local data = {
-            Name = "Workspace", ClassName = "Workspace",
-            _dumpInfo = { timestamp = os.time(), date = os.date("%Y-%m-%d %H:%M:%S"), totalInstances = #workspace:GetDescendants() },
-            _children = dumpInstance(workspace)._children
-        }
-        if Config.AutoSave then saveToFile(data, "Workspace_" .. os.time()) end
-        updateStatus(string.format(getText("StatusSuccess"), "Workspace"))
-    end)
-    
-    btnY = btnY + 44
-    
-    Elements.BtnPlayer = createButton(frame, getText("DumpPlayer"), UDim2.new(0, 10, 0, btnY), Color3.fromRGB(55, 45, 75), function()
-        updateStatus(string.format(getText("StatusDumping"), "LocalPlayer"))
-        local data = {
-            Name = LocalPlayer.Name, ClassName = "Player",
-            _dumpInfo = { timestamp = os.time(), date = os.date("%Y-%m-%d %H:%M:%S"), totalInstances = #LocalPlayer:GetDescendants() },
-            _children = dumpInstance(LocalPlayer)._children
-        }
-        if Config.AutoSave then saveToFile(data, "LocalPlayer_" .. os.time()) end
-        updateStatus(string.format(getText("StatusSuccess"), "LocalPlayer"))
-    end)
-    
-    Elements.BtnGui = createButton(frame, getText("DumpGui"), UDim2.new(0, 195, 0, btnY), Color3.fromRGB(55, 45, 75), function()
-        updateStatus(string.format(getText("StatusDumping"), "StarterGui"))
-        local sg = game:GetService("StarterGui")
-        local data = {
-            Name = "StarterGui", ClassName = "StarterGui",
-            _dumpInfo = { timestamp = os.time(), date = os.date("%Y-%m-%d %H:%M:%S"), totalInstances = #sg:GetDescendants() },
-            _children = dumpInstance(sg)._children
-        }
-        if Config.AutoSave then saveToFile(data, "StarterGui_" .. os.time()) end
-        updateStatus(string.format(getText("StatusSuccess"), "StarterGui"))
-    end)
-    
-    btnY = btnY + 44
-    
-    Elements.BtnCopy = createButton(frame, getText("CopyJSON"), UDim2.new(0, 10, 0, btnY), Color3.fromRGB(35, 75, 55), function()
-        if copyLastJSON() then updateStatus(getText("Copied")) else updateStatus(getText("NothingToCopy")) end
-    end)
-    
-    Elements.BtnList = createButton(frame, getText("ListFiles"), UDim2.new(0, 195, 0, btnY), Color3.fromRGB(75, 55, 35), function()
-        listDumps()
-        updateStatus("📁 Listed in console")
-    end)
-    
-    btnY = btnY + 44
-    
-    Elements.BtnClear = createButton(frame, getText("ClearConsole"), UDim2.new(0, 10, 0, btnY), Color3.fromRGB(60, 60, 60), function()
-        if rconsoleclear then rconsoleclear() end
-        updateStatus(getText("ConsoleCleared"))
-    end)
-    
-    Elements.BtnAutoSave = createButton(frame, getText("ToggleAutoSave") .. tostring(Config.AutoSave), UDim2.new(0, 195, 0, btnY), Color3.fromRGB(60, 60, 60), function()
-        Config.AutoSave = not Config.AutoSave
-        Elements.BtnAutoSave.Text = getText("ToggleAutoSave") .. tostring(Config.AutoSave)
-    end)
-    
-    btnY = btnY + 44
-    
-    -- ปุ่มเปิดหน้าต่างบอกตำแหน่งที่เก็บไฟล์
-    Elements.BtnPathInfo = createButton(frame, getText("FileLocationBtn"), UDim2.new(0, 10, 0, btnY), Color3.fromRGB(30, 80, 100), function()
-        showPathModal(screenGui)
-    end)
-    Elements.BtnPathInfo.Size = UDim2.new(0, 355, 0, 36)
-    
-    -- Bottom Path Label
-    Elements.InfoLabel = Instance.new("TextLabel")
-    Elements.InfoLabel.Text = "Path: workspace/" .. Config.OutputFolder
-    Elements.InfoLabel.Size = UDim2.new(1, -20, 0, 20)
-    Elements.InfoLabel.Position = UDim2.new(0, 10, 1, -25)
-    Elements.InfoLabel.BackgroundTransparency = 1
-    Elements.InfoLabel.TextColor3 = Color3.fromRGB(120, 120, 140)
-    Elements.InfoLabel.Font = Enum.Font.Gotham
-    Elements.InfoLabel.TextSize = 11
-    Elements.InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
-    Elements.InfoLabel.Parent = frame
-    
-    log("✅ Delta Dumper UI Loaded!")
-end
-
--- Global Table
-getgenv().DeltaDump = {
-    Config = Config, Dump = dumpInstance, Save = saveToFile,
-    Copy = copyLastJSON, List = listDumps, JSON = toJSON, UI = UI
-}
-
-if rconsolename then rconsolename("Delta Dumper v2.1") end
-UI:Init()
+print("[Hub Setup] UI Loaded Successfully!")

@@ -1,32 +1,30 @@
--- [[ Roblox Multi-Language Utility Hub ]]
--- Place this script inside StarterPlayer -> StarterPlayerScripts or StarterGui
+-- [[ Roblox Modern UI Suite: Language Selection + Minimizable Window ]]
+-- Location: StarterPlayer -> StarterPlayerScripts or StarterGui
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- -------------------------------------------------------------
--- 1. LOCALIZATION SYSTEM (คลังภาษา)
+-- 1. LOCALIZATION SYSTEM (ระบบภาษา)
 -- -------------------------------------------------------------
-local currentLang = "TH" -- Default Language
+local currentLang = "TH"
 
 local Locales = {
 	TH = {
 		WelcomeTitle = "ยินดีต้อนรับ",
-		WelcomeSub = "กรุณาเลือกภาษาเพื่อเริ่มต้นใช้งาน",
-		ConfirmBtn = "ยืนยัน",
-		HubTitle = "ระบบควบคุมตัวละคร",
-		TabPlayer = "👤 ตัวละคร",
-		TabWorld = "🌍 โลก & แมพ",
-		TabSettings = "⚙️ ตั้งค่า",
+		WelcomeSub = "โปรดเลือกภาษาเพื่อเริ่มต้นใช้งาน",
+		ConfirmBtn = "ยืนยันภาษา",
+		HubTitle = "ระบบควบคุมตัวละคร (Menu)",
 		
 		WalkSpeedLabel = "ความเร็วการเดิน (WalkSpeed)",
 		JumpPowerLabel = "แรงกระโดด (JumpPower)",
-		FovLabel = "ระยะมุมมอง (FOV)",
+		FovLabel = "ระยะมุมมองกล้อง (FOV)",
 		NightVisionLabel = "โหมดมองในที่มืด (Night Vision)",
 		TpSpawnLabel = "วาร์ปกลับจุดเกิด (Teleport to Spawn)",
 		ResetCharLabel = "รีเซ็ตตัวละคร (Reset Character)",
@@ -35,16 +33,13 @@ local Locales = {
 		ToggleOff = "ปิด",
 		Execute = "ทำงาน",
 		Apply = "ปรับใช้",
-		LanguageChanged = "เปลี่ยนภาษาเรียบร้อย!"
+		MinimizedHint = "กด [+] เพื่อขยายหน้าต่าง"
 	},
 	EN = {
 		WelcomeTitle = "Welcome",
-		WelcomeSub = "Please select your preferred language",
-		ConfirmBtn = "Confirm",
-		HubTitle = "Character Control Hub",
-		TabPlayer = "👤 Character",
-		TabWorld = "🌍 World & Map",
-		TabSettings = "⚙️ Settings",
+		WelcomeSub = "Please select your language to start",
+		ConfirmBtn = "Confirm Language",
+		HubTitle = "Character Control Suite",
 		
 		WalkSpeedLabel = "Walk Speed",
 		JumpPowerLabel = "Jump Power",
@@ -57,22 +52,23 @@ local Locales = {
 		ToggleOff = "OFF",
 		Execute = "Execute",
 		Apply = "Apply",
-		LanguageChanged = "Language changed successfully!"
+		MinimizedHint = "Click [+] to expand UI"
 	}
 }
 
--- Helper function for Smooth Tweens
-local function tween(object, info, properties)
-	local t = TweenService:Create(object, TweenInfo.new(unpack(info)), properties)
+local function tween(object, duration, properties, style, direction)
+	style = style or Enum.EasingStyle.Quad
+	direction = direction or Enum.EasingDirection.Out
+	local t = TweenService:Create(object, TweenInfo.new(duration, style, direction), properties)
 	t:Play()
 	return t
 end
 
 -- -------------------------------------------------------------
--- 2. GUI CREATION (สร้าง UI ด้วยโค้ด)
+-- 2. GUI CREATION
 -- -------------------------------------------------------------
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "MultiLangHubGui"
+screenGui.Name = "ModernSystemGui"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
@@ -82,18 +78,18 @@ screenGui.Parent = playerGui
 -- =============================================================
 local langFrame = Instance.new("Frame")
 langFrame.Name = "LanguageFrame"
-langFrame.Size = UDim2.new(0, 380, 0, 260)
-langFrame.Position = UDim2.new(0.5, -190, 0.5, -130)
+langFrame.Size = UDim2.new(0, 360, 0, 250)
+langFrame.Position = UDim2.new(0.5, -180, 0.5, -125)
 langFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 32)
 langFrame.BorderSizePixel = 0
 langFrame.Parent = screenGui
 
 local langCorner = Instance.new("UICorner")
-langCorner.CornerRadius = UDim.new(0, 14)
+langCorner.CornerRadius = UDim.new(0, 12)
 langCorner.Parent = langFrame
 
 local langStroke = Instance.new("UIStroke")
-langStroke.Color = Color3.fromRGB(60, 64, 75)
+langStroke.Color = Color3.fromRGB(60, 65, 78)
 langStroke.Thickness = 1.5
 langStroke.Parent = langFrame
 
@@ -102,7 +98,7 @@ langTitle.Size = UDim2.new(1, 0, 0, 40)
 langTitle.Position = UDim2.new(0, 0, 0, 15)
 langTitle.BackgroundTransparency = 1
 langTitle.Font = Enum.Font.GothamBold
-langTitle.TextSize = 22
+langTitle.TextSize = 20
 langTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 langTitle.Text = "ยินดีต้อนรับ / Welcome"
 langTitle.Parent = langFrame
@@ -114,82 +110,81 @@ langSub.BackgroundTransparency = 1
 langSub.Font = Enum.Font.Gotham
 langSub.TextSize = 13
 langSub.TextColor3 = Color3.fromRGB(160, 165, 175)
-langSub.Text = "กรุณาเลือกภาษาเพื่อเริ่มต้น / Select a language"
+langSub.Text = "เลือกภาษาการใช้งาน / Select Language"
 langSub.Parent = langFrame
 
--- Option Buttons (TH & EN)
 local selectedLang = "TH"
 
+-- ปุ่ม TH & EN
 local btnTH = Instance.new("TextButton")
-btnTH.Size = UDim2.new(0, 155, 0, 45)
-btnTH.Position = UDim2.new(0.5, -165, 0, 95)
+btnTH.Size = UDim2.new(0, 145, 0, 45)
+btnTH.Position = UDim2.new(0.5, -155, 0, 95)
 btnTH.BackgroundColor3 = Color3.fromRGB(0, 180, 216)
 btnTH.Font = Enum.Font.GothamMedium
-btnTH.TextSize = 16
+btnTH.TextSize = 15
 btnTH.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnTH.Text = "🇹🇭 ภาษาไทย"
 btnTH.Parent = langFrame
 
 local btnTHCorner = Instance.new("UICorner")
-btnTHCorner.CornerRadius = UDim.new(0, 10)
+btnTHCorner.CornerRadius = UDim.new(0, 8)
 btnTHCorner.Parent = btnTH
 
 local btnEN = Instance.new("TextButton")
-btnEN.Size = UDim2.new(0, 155, 0, 45)
+btnEN.Size = UDim2.new(0, 145, 0, 45)
 btnEN.Position = UDim2.new(0.5, 10, 0, 95)
 btnEN.BackgroundColor3 = Color3.fromRGB(35, 38, 46)
 btnEN.Font = Enum.Font.GothamMedium
-btnEN.TextSize = 16
+btnEN.TextSize = 15
 btnEN.TextColor3 = Color3.fromRGB(180, 185, 195)
 btnEN.Text = "🇬🇧 English"
 btnEN.Parent = langFrame
 
 local btnENCorner = Instance.new("UICorner")
-btnENCorner.CornerRadius = UDim.new(0, 10)
+btnENCorner.CornerRadius = UDim.new(0, 8)
 btnENCorner.Parent = btnEN
 
--- Confirm Button
 local confirmBtn = Instance.new("TextButton")
-confirmBtn.Size = UDim2.new(1, -40, 0, 45)
-confirmBtn.Position = UDim2.new(0, 20, 1, -65)
+confirmBtn.Size = UDim2.new(1, -40, 0, 42)
+confirmBtn.Position = UDim2.new(0, 20, 1, -60)
 confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 201, 167)
 confirmBtn.Font = Enum.Font.GothamBold
-confirmBtn.TextSize = 16
+confirmBtn.TextSize = 15
 confirmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 confirmBtn.Text = "ยืนยัน / Confirm"
 confirmBtn.Parent = langFrame
 
 local confirmCorner = Instance.new("UICorner")
-confirmCorner.CornerRadius = UDim.new(0, 10)
+confirmCorner.CornerRadius = UDim.new(0, 8)
 confirmCorner.Parent = confirmBtn
 
--- Language Selection Logic
 btnTH.MouseButton1Click:Connect(function()
 	selectedLang = "TH"
-	tween(btnTH, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
-	tween(btnEN, {0.2}, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
+	tween(btnTH, 0.2, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
+	tween(btnEN, 0.2, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
 end)
 
 btnEN.MouseButton1Click:Connect(function()
 	selectedLang = "EN"
-	tween(btnEN, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
-	tween(btnTH, {0.2}, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
+	tween(btnEN, 0.2, {BackgroundColor3 = Color3.fromRGB(0, 180, 216), TextColor3 = Color3.fromRGB(255, 255, 255)})
+	tween(btnTH, 0.2, {BackgroundColor3 = Color3.fromRGB(35, 38, 46), TextColor3 = Color3.fromRGB(180, 185, 195)})
 end)
 
 -- =============================================================
--- B. MAIN DASHBOARD HUB (หน้าเมนูหลัก)
+-- B. MAIN DASHBOARD FRAME (หน้าต่างหลักที่ย่อ/ขยายได้)
 -- =============================================================
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 520, 0, 320)
-mainFrame.Position = UDim2.new(0.5, -260, 0.5, -160)
+mainFrame.Size = UDim2.new(0, 440, 0, 340)
+mainFrame.Position = UDim2.new(0.5, -220, 0.5, -170)
 mainFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
 mainFrame.Visible = false
 mainFrame.Parent = screenGui
 
 local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 14)
+mainCorner.CornerRadius = UDim.new(0, 12)
 mainCorner.Parent = mainFrame
 
 local mainStroke = Instance.new("UIStroke")
@@ -197,80 +192,121 @@ mainStroke.Color = Color3.fromRGB(45, 48, 58)
 mainStroke.Thickness = 1.5
 mainStroke.Parent = mainFrame
 
--- Topbar
+-- Topbar (แถบด้านบน)
 local topbar = Instance.new("Frame")
-topbar.Size = UDim2.new(1, 0, 0, 45)
-topbar.BackgroundTransparency = 1
+topbar.Name = "Topbar"
+topbar.Size = UDim2.new(1, 0, 0, 42)
+topbar.Position = UDim2.new(0, 0, 0, 0)
+topbar.BackgroundColor3 = Color3.fromRGB(26, 29, 36)
+topbar.BorderSizePixel = 0
 topbar.Parent = mainFrame
 
-local hubTitleLabel = Instance.new("TextLabel")
-hubTitleLabel.Size = UDim2.new(1, -60, 1, 0)
-hubTitleLabel.Position = UDim2.new(0, 20, 0, 0)
-hubTitleLabel.BackgroundTransparency = 1
-hubTitleLabel.Font = Enum.Font.GothamBold
-hubTitleLabel.TextSize = 16
-hubTitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-hubTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-hubTitleLabel.Parent = topbar
+local topbarCorner = Instance.new("UICorner")
+topbarCorner.CornerRadius = UDim.new(0, 12)
+topbarCorner.Parent = topbar
 
+local hubTitle = Instance.new("TextLabel")
+hubTitle.Name = "Title"
+hubTitle.Size = UDim2.new(1, -90, 1, 0)
+hubTitle.Position = UDim2.new(0, 15, 0, 0)
+hubTitle.BackgroundTransparency = 1
+hubTitle.Font = Enum.Font.GothamBold
+hubTitle.TextSize = 14
+hubTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+hubTitle.TextXAlignment = Enum.TextXAlignment.Left
+hubTitle.Parent = topbar
+
+-- ปุ่มย่อหน้าต่าง (Minimize Button)
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeButton"
+minimizeBtn.Size = UDim2.new(0, 28, 0, 28)
+minimizeBtn.Position = UDim2.new(1, -68, 0.5, -14)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 50, 62)
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 14
+minimizeBtn.TextColor3 = Color3.fromRGB(220, 225, 235)
+minimizeBtn.Text = "-"
+minimizeBtn.Parent = topbar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeBtn
+
+-- ปุ่มปิด/สลับภาษา (Close Button)
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -38, 0.5, -15)
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -34, 0.5, -14)
 closeBtn.BackgroundColor3 = Color3.fromRGB(235, 87, 87)
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
+closeBtn.TextSize = 12
 closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.Text = "✕"
 closeBtn.Parent = topbar
 
 local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.CornerRadius = UDim.new(0, 6)
 closeCorner.Parent = closeBtn
 
+-- Content Area (ส่วนเนื้อหาที่จะถูกซ่อนเมื่อย่อหน้าต่าง)
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -30, 1, -55)
+contentFrame.Position = UDim2.new(0, 15, 0, 48)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+local contentLayout = Instance.new("UIListLayout")
+contentLayout.Padding = UDim.new(0, 8)
+contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+contentLayout.Parent = contentFrame
+
+-- -------------------------------------------------------------
+-- 3. MINIMIZE / EXPAND LOGIC (ระบบย่อและขยายหน้าต่าง)
+-- -------------------------------------------------------------
+local expandedSize = UDim2.new(0, 440, 0, 340)
+local minimizedSize = UDim2.new(0, 440, 0, 42) -- เหลือเฉพาะความสูง Topbar
+local isMinimized = false
+
+local function toggleMinimize()
+	isMinimized = not isMinimized
+	
+	if isMinimized then
+		-- ซ่อนเนื้อหาก่อน แล้วย่อขนาดกล่องหลักลงมา
+		contentFrame.Visible = false
+		tween(mainFrame, 0.3, {Size = minimizedSize}, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		minimizeBtn.Text = "+"
+		tween(minimizeBtn, 0.2, {BackgroundColor3 = Color3.fromRGB(0, 201, 167)})
+	else
+		-- ขยายกล่องหลักขึ้นก่อน แล้วแสดงเนื้อหาเมื่อขยายเสร็จ
+		minimizeBtn.Text = "-"
+		tween(minimizeBtn, 0.2, {BackgroundColor3 = Color3.fromRGB(45, 50, 62)})
+		
+		local t = tween(mainFrame, 0.3, {Size = expandedSize}, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		t.Completed:Connect(function()
+			if not isMinimized then
+				contentFrame.Visible = true
+			end
+		end)
+	end
+end
+
+minimizeBtn.MouseButton1Click:Connect(toggleMinimize)
+
 closeBtn.MouseButton1Click:Connect(function()
+	-- เมื่อกดปิด ให้ซ่อนหน้าต่างหลัก แล้วแสดงหน้าเลือกภาษา
 	mainFrame.Visible = false
 	langFrame.Visible = true
 end)
 
--- Sidebar (Left)
-local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 150, 1, -45)
-sidebar.Position = UDim2.new(0, 0, 0, 45)
-sidebar.BackgroundColor3 = Color3.fromRGB(26, 28, 35)
-sidebar.BorderSizePixel = 0
-sidebar.Parent = mainFrame
-
-local sidebarCorner = Instance.new("UICorner")
-sidebarCorner.CornerRadius = UDim.new(0, 14)
-sidebarCorner.Parent = sidebar
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.Padding = UDim.new(0, 6)
-tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-tabLayout.Parent = sidebar
-
-local tabPadding = Instance.new("UIPadding")
-tabPadding.PaddingTop = UDim.new(0, 10)
-tabPadding.Parent = sidebar
-
--- Content Container (Right)
-local container = Instance.new("Frame")
-container.Size = UDim2.new(1, -165, 1, -55)
-container.Position = UDim2.new(0, 155, 0, 45)
-container.BackgroundTransparency = 1
-container.Parent = mainFrame
-
-local contentLayout = Instance.new("UIListLayout")
-contentLayout.Padding = UDim.new(0, 10)
-contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-contentLayout.Parent = container
-
--- Helper Function to Create UI Items
-local function createFunctionRow(labelText, actionType, callback)
+-- -------------------------------------------------------------
+-- 4. FUNCTION BUILDERS & LOGIC
+-- -------------------------------------------------------------
+local function createRow(labelText, actionType, callback)
 	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, -10, 0, 42)
-	row.BackgroundColor3 = Color3.fromRGB(30, 33, 42)
-	row.Parent = container
+	row.Size = UDim2.new(1, 0, 0, 40)
+	row.BackgroundColor3 = Color3.fromRGB(28, 31, 39)
+	row.Parent = contentFrame
 	
 	local rowCorner = Instance.new("UICorner")
 	rowCorner.CornerRadius = UDim.new(0, 8)
@@ -289,8 +325,8 @@ local function createFunctionRow(labelText, actionType, callback)
 	
 	if actionType == "Button" then
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(0.3, 0, 0, 28)
-		btn.Position = UDim2.new(0.68, 0, 0.5, -14)
+		btn.Size = UDim2.new(0.3, 0, 0, 26)
+		btn.Position = UDim2.new(0.68, 0, 0.5, -13)
 		btn.BackgroundColor3 = Color3.fromRGB(0, 180, 216)
 		btn.Font = Enum.Font.GothamBold
 		btn.TextSize = 12
@@ -302,18 +338,17 @@ local function createFunctionRow(labelText, actionType, callback)
 		btnC.CornerRadius = UDim.new(0, 6)
 		btnC.Parent = btn
 		
-		btn.MouseButton1Click:Connect(function()
-			callback()
-		end)
+		btn.MouseButton1Click:Connect(callback)
+		
 	elseif actionType == "Toggle" then
 		local toggled = false
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(0.3, 0, 0, 28)
-		btn.Position = UDim2.new(0.68, 0, 0.5, -14)
-		btn.BackgroundColor3 = Color3.fromRGB(50, 55, 65)
+		btn.Size = UDim2.new(0.3, 0, 0, 26)
+		btn.Position = UDim2.new(0.68, 0, 0.5, -13)
+		btn.BackgroundColor3 = Color3.fromRGB(45, 50, 60)
 		btn.Font = Enum.Font.GothamBold
 		btn.TextSize = 12
-		btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+		btn.TextColor3 = Color3.fromRGB(180, 185, 195)
 		btn.Text = Locales[currentLang].ToggleOff
 		btn.Parent = row
 		
@@ -324,23 +359,24 @@ local function createFunctionRow(labelText, actionType, callback)
 		btn.MouseButton1Click:Connect(function()
 			toggled = not toggled
 			if toggled then
-				tween(btn, {0.2}, {BackgroundColor3 = Color3.fromRGB(0, 201, 167), TextColor3 = Color3.fromRGB(255, 255, 255)})
+				tween(btn, 0.2, {BackgroundColor3 = Color3.fromRGB(0, 201, 167), TextColor3 = Color3.fromRGB(255, 255, 255)})
 				btn.Text = Locales[currentLang].ToggleOn
 			else
-				tween(btn, {0.2}, {BackgroundColor3 = Color3.fromRGB(50, 55, 65), TextColor3 = Color3.fromRGB(200, 200, 200)})
+				tween(btn, 0.2, {BackgroundColor3 = Color3.fromRGB(45, 50, 60), TextColor3 = Color3.fromRGB(180, 185, 195)})
 				btn.Text = Locales[currentLang].ToggleOff
 			end
 			callback(toggled)
 		end)
+		
 	elseif actionType == "Input" then
 		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(0.3, 0, 0, 28)
-		box.Position = UDim2.new(0.68, 0, 0.5, -14)
-		box.BackgroundColor3 = Color3.fromRGB(40, 44, 55)
+		box.Size = UDim2.new(0.3, 0, 0, 26)
+		box.Position = UDim2.new(0.68, 0, 0.5, -13)
+		box.BackgroundColor3 = Color3.fromRGB(38, 42, 52)
 		box.Font = Enum.Font.Gotham
-		box.TextSize = 13
+		box.TextSize = 12
 		box.TextColor3 = Color3.fromRGB(255, 255, 255)
-		box.PlaceholderText = "Val"
+		box.PlaceholderText = "..."
 		box.Text = ""
 		box.Parent = row
 		
@@ -357,33 +393,31 @@ local function createFunctionRow(labelText, actionType, callback)
 			end
 		end)
 	end
-	return row
 end
 
--- Refresh Language Function
+-- ฟังก์ชันอัปเดตรายการฟังก์ชันเมื่อเปลี่ยนภาษา
 local function applyLanguage(langKey)
 	currentLang = langKey
 	local l = Locales[langKey]
 	
-	hubTitleLabel.Text = l.HubTitle
+	hubTitle.Text = l.HubTitle
 	
-	-- Clear Container
-	for _, child in ipairs(container:GetChildren()) do
+	-- ล้างรายการเก่า
+	for _, child in ipairs(contentFrame:GetChildren()) do
 		if not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
 	end
 	
-	-- Populate Functions based on selected language
 	-- 1. WalkSpeed
-	createFunctionRow(l.WalkSpeedLabel, "Input", function(val)
+	createRow(l.WalkSpeedLabel, "Input", function(val)
 		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
 			player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = val
 		end
 	end)
 	
 	-- 2. JumpPower
-	createFunctionRow(l.JumpPowerLabel, "Input", function(val)
+	createRow(l.JumpPowerLabel, "Input", function(val)
 		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
 			hum.UseJumpPower = true
@@ -391,13 +425,13 @@ local function applyLanguage(langKey)
 		end
 	end)
 	
-	-- 3. FOV Adjuster
-	createFunctionRow(l.FovLabel, "Input", function(val)
+	-- 3. FOV
+	createRow(l.FovLabel, "Input", function(val)
 		Workspace.CurrentCamera.FieldOfView = math.clamp(val, 30, 120)
 	end)
 	
-	-- 4. Night Vision Toggle
-	createFunctionRow(l.NightVisionLabel, "Toggle", function(state)
+	-- 4. Night Vision
+	createRow(l.NightVisionLabel, "Toggle", function(state)
 		if state then
 			Lighting.Ambient = Color3.fromRGB(255, 255, 255)
 			Lighting.Brightness = 3
@@ -407,12 +441,12 @@ local function applyLanguage(langKey)
 		end
 	end)
 	
-	-- 5. Teleport Spawn
-	createFunctionRow(l.TpSpawnLabel, "Button", function()
+	-- 5. Teleport to Spawn
+	createRow(l.TpSpawnLabel, "Button", function()
 		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-			local spawnLocation = Workspace:FindFirstChildOfClass("SpawnLocation")
-			if spawnLocation then
-				player.Character.HumanoidRootPart.CFrame = spawnLocation.CFrame + Vector3.new(0, 5, 0)
+			local spawnLoc = Workspace:FindFirstChildOfClass("SpawnLocation")
+			if spawnLoc then
+				player.Character.HumanoidRootPart.CFrame = spawnLoc.CFrame + Vector3.new(0, 5, 0)
 			else
 				player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
 			end
@@ -420,30 +454,31 @@ local function applyLanguage(langKey)
 	end)
 	
 	-- 6. Reset Character
-	createFunctionRow(l.ResetCharLabel, "Button", function()
+	createRow(l.ResetCharLabel, "Button", function()
 		if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
 			player.Character:FindFirstChildOfClass("Humanoid").Health = 0
 		end
 	end)
 end
 
--- Confirm Button Click
+-- เมื่อกดปุ่มยืนยันภาษา
 confirmBtn.MouseButton1Click:Connect(function()
 	currentLang = selectedLang
 	applyLanguage(currentLang)
 	
-	-- Smooth Fade Out Language Screen & Fade In Main Hub
-	tween(langFrame, {0.3}, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
-	task.wait(0.25)
+	-- อนิเมชันเปิดหน้าต่างหลัก
 	langFrame.Visible = false
-	
 	mainFrame.Size = UDim2.new(0, 0, 0, 0)
 	mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	mainFrame.Visible = true
-	tween(mainFrame, {0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out}, {
-		Size = UDim2.new(0, 520, 0, 320),
-		Position = UDim2.new(0.5, -260, 0.5, -160)
-	})
+	contentFrame.Visible = true
+	isMinimized = false
+	minimizeBtn.Text = "-"
+	
+	tween(mainFrame, 0.35, {
+		Size = expandedSize,
+		Position = UDim2.new(0.5, -220, 0.5, -170)
+	}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 end)
 
-print("[Hub Setup] UI Loaded Successfully!")
+print("[UI System] Initialized successfully!")

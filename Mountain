@@ -1,709 +1,1332 @@
---// Boulder & Rune Auto Farm System v3.0 - DELTA EDITION
---// ออกแบบมาสำหรับ Delta Executor โดยเฉพาะ
---// วางไว้ใน AutoExecute หรือ Execute ตอนเข้าเกม
+-- [[ Daley Hub v4.0 - Custom Responsive UI Edition ]] --
+-- Features:
+-- 1. Custom Responsive GUI built from scratch (No external library dependency)
+-- 2. Language Selection Screen on launch (Thai 🇹🇭 / English 🇬🇧) with live dynamic UI translation
+-- 3. Resizable & Responsive Layout (Supports Mobile, Tablet, PC with UIAspectRatioConstraint & UIScale)
+-- 4. Boulder Scanner, Boulder X-Ray (AlwaysOnTop ESP + Distance Labels), TP to Boulder, Auto Mine Boulder
+-- 5. Rune Scanner, Rune X-Ray ESP, TP to Rune, Auto Mine Rune
+-- 6. Max Weight Filter for Crystal Searching (Enable/Disable + Custom Max Weight Limit)
+-- 7. Drop All Ores Except Runes (Manual + Auto Drop)
+-- 8. Auto Collect Nearby Ores / Drops / Proximity Prompts
+-- 9. Auto Sell when Inventory is Full (Capacity/Weight Detector)
+-- 10. Player Teleport & Bring Player
+-- 11. Locomotion: CFrame WalkSpeed, Fly Mode, Float Mode, Noclip
+-- 12. Fast Digging (High-frequency Remote & Tool Activation)
+-- 13. Auto Stat Upgrades (Air 1-3, Weight 1-3)
+-- 14. Server Player ESP & Crystal ESP
 
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
-local Stats = game:GetService("Stats")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+local LP = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
---// Delta API Detection
-local DeltaAPI = {
-    QueueTeleport = queue_on_teleport or syn and syn.queue_on_teleport,
-    HttpRequest = http_request or request or syn and syn.request,
-    ProtectGui = protectgui or gethui and function(gui) gui.Parent = gethui() end,
-    WriteFile = writefile,
-    ReadFile = readfile,
-    IsFile = isfile,
-    MakeFolder = makefolder,
-    ListFiles = listfiles,
-    GetConnections = getconnections,
-    FireTouch = firetouchinterest,
-    FirePrompt = fireproximityprompt,
-    FireClick = fireclickdetector,
-    HookFunction = hookfunction,
-    GetRawMeta = getrawmetatable,
-    CheckCaller = checkcaller,
-    GetNamecallMethod = getnamecallmethod,
+-- ==========================================
+-- [[ REMOTE & INSTANCE PATHS ]] --
+-- ==========================================
+local RemotesFolder = ReplicatedStorage:WaitForChild("Remotes", 3)
+local DigRequest = RemotesFolder and RemotesFolder:WaitForChild("DigRequest", 2)
+local SellRequest = RemotesFolder and RemotesFolder:WaitForChild("SellRequest", 2)
+local UpgradeBuy = RemotesFolder and RemotesFolder:WaitForChild("UpgradeBuy", 2)
+local DropRequest = RemotesFolder and (RemotesFolder:FindFirstChild("DropRequest") or RemotesFolder:FindFirstChild("DropItem") or RemotesFolder:FindFirstChild("DropOre"))
+
+local ThingsFolder = Workspace:WaitForChild("Things", 3)
+local CrystalsFolder = ThingsFolder and ThingsFolder:WaitForChild("Crystals", 3)
+local BouldersFolder = (ThingsFolder and ThingsFolder:FindFirstChild("Boulders")) or Workspace:FindFirstChild("Boulders")
+local DropsFolder = ThingsFolder and (ThingsFolder:FindFirstChild("Drops") or ThingsFolder:FindFirstChild("Ores") or ThingsFolder:FindFirstChild("Items"))
+
+-- ==========================================
+-- [[ STATE STORAGE ]] --
+-- ==========================================
+local CurrentLang = "TH" -- Default "TH" or "EN"
+
+local States = {
+    -- Locomotion
+    SpeedEnabled       = false,
+    SpeedValue         = 50,
+    FlyEnabled         = false,
+    FlySpeed           = 50,
+    FloatEnabled       = false,
+    FloatHeight        = 5,
+    NoclipEnabled      = false,
+
+    -- Visuals / ESP
+    PlayerESP          = false,
+    CrystalESP         = false,
+    RuneESP            = false,
+    BoulderESP         = false,
+    SelectedPlayer     = nil,
+
+    -- Weight & Inventory Controls
+    WeightFilterEnabled = false,
+    MaxAllowedWeight   = 100,
+    AutoDropExceptRunes = false,
+    AutoSellWhenFull   = true,
+    InventoryMaxCapacity = 100,
+    CurrentInventoryWeight = 0,
+
+    -- Auto Pickup / Collect
+    AutoCollectOres    = false,
+    AutoCollectRadius  = 50,
+
+    -- Digging Automation
+    FastDigEnabled     = false,
+    FastDigDelay       = 0.05,
+    AutoDigEnabled     = false,
+    DiggerToolName     = "Rusty Scrapper",
+    AutoSellEnabled    = false,
+
+    -- Rune & Boulder Farming
+    AutoRuneFarm       = false,
+    CurrentRune        = nil,
+    AutoBoulderFarm    = false,
+    CurrentBoulder     = nil,
+
+    -- Upgrades
+    AutoAir1           = false,
+    AutoAir2           = false,
+    AutoAir3           = false,
+    AutoWeight1        = false,
+    AutoWeight2        = false,
+    AutoWeight3        = false,
+
+    -- Crystal Farming
+    AutoCrystal        = false,
+    CurrentCrystal     = nil,
+    CrystalHoldTime    = 5,        
+    LockTimestamp      = 0,
+    SkipCurrent        = false     
 }
 
---// ตั้งค่าหลัก
-local CONFIG = {
-    FarmBoulders = true,
-    FarmRunes = true,
-    TeleportSpeed = 250,         -- ความเร็ว Tween (studs/วิ)
-    BoulderOffset = Vector3.new(0, 4, 5),
-    RuneOffset = Vector3.new(0, 2, 0),
-    DigDelay = 0.15,             -- ความถี่ขุด (ยิ่งน้อยยิ่งเร็ว)
-    RuneCollectDelay = 0.2,
-    SearchRadius = 3000,         -- รัศมีค้นหาใหญ่ขึ้น
-    AutoEquipPickaxe = true,
-    AutoRejoin = true,
-    RejoinDelay = 3,             -- วินาทีรอก่อนรีจอย
-    MinBouldersBeforeRejoin = 0,
-    SelectedTiers = {true, true, true, true, true, true},
-    ToggleKey = Enum.KeyCode.RightShift,
-    AntiAFK = true,
-    DiscordWebhook = "",         -- ใส่ Webhook URL ถ้าต้องการแจ้งเตือน Discord
-    NotifyOnRejoin = true,
-    AutoLoadOnTeleport = true,   -- Auto execute หลังรีจอย (ใช้ queue_on_teleport)
+local Player_ESP_Cache = {}
+local Crystal_ESP_Cache = {}
+local Rune_ESP_Cache = {}
+local Boulder_ESP_Cache = {}
+local PermanentBlacklist = {}  
+local CrystalTargetStartTime = 0 
 
-    -- Pickaxe List
-    PickaxeNames = {
-        "Diamond Pickaxe", "Celestial Apex", "Tempest Pick", "Obsidian Edge",
-        "Frostbite Pick", "Emerald Carver", "Copper Pick", "Hardened Iron",
-        "Reinforced Steel", "Rusty Scrapper", "Titanium Spike", "Volcano Basalt",
-        "Weathered Wood", "Chipped Stone", "The Terminus", "Singularity",
-        "Voidreign", "Nebular Throne", "Eclipse Fang", "Astral Rend", "Shark Pickaxe"
+-- ==========================================
+-- [[ BILINGUAL DICTIONARY (L10N) ]] --
+-- ==========================================
+local L10N = {
+    TH = {
+        HubTitle = "Daley Hub v4.0 - Utility Suite",
+        SelectLangTitle = "กรุณาเลือกภาษา / Select Language",
+        LangTH = "🇹🇭 ภาษาไทย",
+        LangEN = "🇬🇧 English",
+        Tabs = {
+            Locomotion = "✈️ เคลื่อนที่/บิน",
+            Mining = "⛏️ ขุดออโต้",
+            BoulderRune = "🪨 Boulder & Rune",
+            Inventory = "🎒 กระเป๋า & ขาย",
+            Visuals = "👁️ ESP & ผู้เล่น",
+            Settings = "📍 พิกัด & ตั้งค่า"
+        },
+        Labels = {
+            CFrameSpeed = "วิ่งเร็ว (CFrame Speed)",
+            WalkSpeedScale = "ปรับระดับความเร็ววิ่ง",
+            FlyMode = "โหมดบิน (Fly Mode)",
+            FlySpeedScale = "ปรับความเร็วบิน",
+            FloatMode = "โหมดลอยตัว (Float Mode)",
+            FloatHeight = "ระยะความสูงลอยตัว",
+            Noclip = "เดินทะลุกำแพง (Noclip)",
+            ToolName = "ชื่ออุปกรณ์ขุด (Tool Name)",
+            AutoDig = "ขุดออโต้ (Auto Dig Remote)",
+            FastDig = "ขุดไว (Fast Dig Cooldown)",
+            FastDigDelay = "ปรับ Cooldown ความเร็วขุด (วินาที)",
+            AutoSellAll = "ขายของออโต้ตลอดเวลา",
+            AutoMineCrystal = "ขุดแร่ออโต้ (วาป + ขุด)",
+            TpNearestCrystal = "วาปไปหาแร่ใกล้ที่สุด",
+            HoldTime = "ระยะเวลาเกาะแร่แต่ละก้อน (วินาที)",
+            NextCrystal = "ข้ามไปแร่ก้อนถัดไป",
+            BlacklistCrystal = "บล็อกแร่ก้อนนี้ (Blacklist)",
+            WeightFilter = "กรองน้ำหนักแร่ (ไม่ขุดแร่หนักเกินกำหนด)",
+            MaxWeight = "น้ำหนักแร่สูงสุดที่อนุญาต (Max Weight)",
+            AutoSellFull = "ขายออโต้เมื่อกระเป๋าเต็ม (Full Sell)",
+            DropOresKeepRunes = "ทิ้งแร่ทั้งหมดในกระเป๋า (ยกเว้น Rune)",
+            AutoDropExceptRunes = "ทิ้งแร่อื่นๆ อัตโนมัติ (เก็บเฉพาะ Rune)",
+            AutoCollectOres = "เก็บแร่/ไอเทมรอบตัวออโต้ (Auto Pick)",
+            BoulderESP = "X-Ray Boulder ส่องเห็นทะลุกำแพง",
+            TpNearestBoulder = "วาปไปหา Boulder ใกล้ที่สุด",
+            AutoMineBoulder = "ขุด Boulder ออโต้ (TP + Dig)",
+            RuneESP = "X-Ray Rune (แสดงกรอบทอง)",
+            TpNearestRune = "วาปไปหา Rune ใกล้ที่สุด",
+            AutoMineRune = "ขุด Rune ออโต้ (เน้น Rune)",
+            PlayerESP = "ESP มองเห็นผู้เล่นในเซิร์ฟเวอร์",
+            CrystalESP = "ESP มองเห็นแร่ทั้งหมด",
+            SelectPlayer = "เลือกผู้เล่นเป้าหมาย:",
+            TpToPlayer = "วาปไปหาผู้เล่น",
+            BringPlayer = "วาปผู้เล่นมาหาเรา (Bring)",
+            RefreshPlayers = "รีเฟรชรายชื่อผู้เล่น",
+            CurrentPos = "พิกัดปัจจุบัน:",
+            TpSpawn = "วาปกลับจุดเกิด (Spawn)",
+            CopyCoords = "คัดลอกพิกัดลง Clipboard",
+            SwitchLang = "เปลี่ยนเป็นภาษา English",
+            UIScale = "ปรับขนาดหน้าต่าง UI"
+        },
+        Notifs = {
+            SwitchedLang = "เปลี่ยนภาษาเป็นภาษาไทยเรียบร้อยแล้ว",
+            Warped = "วาปเรียบร้อยแล้ว",
+            Copied = "คัดลอกพิกัดลง Clipboard แล้ว",
+            Cleaned = "ทิ้งแร่อื่นๆ ในกระเป๋าเรียบร้อยแล้ว",
+            NotFound = "ไม่พบเป้าหมายในระยะ!",
+            FullSold = "กระเป๋าเต็ม! ขายของให้อัตโนมัติแล้ว"
+        }
     },
-
-    -- Tier Detection Keywords
-    TierKeywords = {
-        [1] = {"Common", "Basic", "Stone", "Pebbles", "Normal"},
-        [2] = {"Uncommon", "Copper", "Iron", "Granite", "Green"},
-        [3] = {"Rare", "Silver", "Gold", "Crystal", "Quartz", "Blue"},
-        [4] = {"Epic", "Platinum", "Diamond", "Emerald", "Sapphire", "Purple"},
-        [5] = {"Legendary", "Obsidian", "Celestial", "Void", "Astral", "Orange"},
-        [6] = {"Mythic", "Divine", "Ethereal", "Godly", "Ancient", "Rainbow"}
-    },
-    TierColors = {
-        Color3.fromRGB(169, 169, 169),
-        Color3.fromRGB(0, 200, 0),
-        Color3.fromRGB(0, 100, 255),
-        Color3.fromRGB(150, 0, 200),
-        Color3.fromRGB(255, 140, 0),
-        Color3.fromRGB(255, 50, 50),
-    },
-    TierNames = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"}
+    EN = {
+        HubTitle = "Daley Hub v4.0 - Utility Suite",
+        SelectLangTitle = "Select Language / กรุณาเลือกภาษา",
+        LangTH = "🇹🇭 Thai",
+        LangEN = "🇬🇧 English",
+        Tabs = {
+            Locomotion = "✈️ Movement/Fly",
+            Mining = "⛏️ Auto Dig",
+            BoulderRune = "🪨 Boulder & Rune",
+            Inventory = "🎒 Inventory & Sell",
+            Visuals = "👁️ ESP & Players",
+            Settings = "📍 Coords & Config"
+        },
+        Labels = {
+            CFrameSpeed = "CFrame Speed Mode",
+            WalkSpeedScale = "Walk Speed Scale",
+            FlyMode = "Fly Mode",
+            FlySpeedScale = "Fly Speed Scale",
+            FloatMode = "Float Mode",
+            FloatHeight = "Float Height Offset",
+            Noclip = "Noclip Mesh Overrides",
+            ToolName = "Equipped Digger Tool Name",
+            AutoDig = "Auto Dig Toggle",
+            FastDig = "Fast Dig Mode",
+            FastDigDelay = "Fast Dig Delay (s)",
+            AutoSellAll = "Auto Sell All Toggle",
+            AutoMineCrystal = "Auto Mine Crystals (TP + Dig)",
+            TpNearestCrystal = "Teleport to Nearest Crystal",
+            HoldTime = "Crystal Hold Timer (s)",
+            NextCrystal = "Next Crystal (Skip)",
+            BlacklistCrystal = "Blacklist Target Crystal",
+            WeightFilter = "Enable Weight Filter",
+            MaxWeight = "Max Allowed Crystal Weight",
+            AutoSellFull = "Auto Sell When Inventory Full",
+            DropOresKeepRunes = "Drop All Ores (Keep Runes)",
+            AutoDropExceptRunes = "Auto Drop Non-Rune Ores",
+            AutoCollectOres = "Auto Collect Nearby Drops/Ores",
+            BoulderESP = "X-Ray Boulder ESP (Through Walls)",
+            TpNearestBoulder = "Teleport to Nearest Boulder",
+            AutoMineBoulder = "Auto Mine Boulders (TP + Dig)",
+            RuneESP = "X-Ray Rune ESP (Golden Chams)",
+            TpNearestRune = "Teleport to Nearest Rune",
+            AutoMineRune = "Auto Farm Runes Only",
+            PlayerESP = "Server Player ESP",
+            CrystalESP = "Server Crystal ESP",
+            SelectPlayer = "Select Target Player:",
+            TpToPlayer = "Teleport to Target Player",
+            BringPlayer = "Bring Target Player to Me",
+            RefreshPlayers = "Refresh Player List",
+            CurrentPos = "Current Location:",
+            TpSpawn = "Teleport to Spawn",
+            CopyCoords = "Copy Coordinates to Clipboard",
+            SwitchLang = "Switch to ภาษาไทย",
+            UIScale = "Adjust UI Scale"
+        },
+        Notifs = {
+            SwitchedLang = "Language switched to English",
+            Warped = "Teleported successfully",
+            Copied = "Coordinates copied to clipboard",
+            Cleaned = "Dropped non-rune ores",
+            NotFound = "Target not found in workspace!",
+            FullSold = "Inventory full! Auto-sold items."
+        }
+    }
 }
 
---// สถานะ
-_G.AutoFarmEnabled = false
-local isFarming = false
-local currentJobId = game.JobId
-local placeId = game.PlaceId
-local boulderCount = 0
-local totalMined = 0
-local totalRunes = 0
-local sessionStart = tick()
-
---// บันทึกข้อมูลสำหรับ Rejoin
-local SAVE_FOLDER = "DeltaBoulderFarm"
-local SAVE_FILE = SAVE_FOLDER .. "/config.json"
-local JOB_FILE = SAVE_FOLDER .. "/jobid.txt"
-
-pcall(function()
-    if DeltaAPI.MakeFolder and not DeltaAPI.IsFile(SAVE_FOLDER) then
-        DeltaAPI.MakeFolder(SAVE_FOLDER)
+local function Text(key, subKey)
+    local dict = L10N[CurrentLang] or L10N.TH
+    if subKey and dict[key] then
+        return dict[key][subKey] or subKey
     end
-end)
-
-local function saveData()
-    pcall(function()
-        if DeltaAPI.WriteFile then
-            local data = {
-                JobId = currentJobId,
-                PlaceId = placeId,
-                SelectedTiers = CONFIG.SelectedTiers,
-                FarmBoulders = CONFIG.FarmBoulders,
-                FarmRunes = CONFIG.FarmRunes,
-                TotalMined = totalMined,
-                TotalRunes = totalRunes,
-                Timestamp = os.time()
-            }
-            DeltaAPI.WriteFile(SAVE_FILE, HttpService:JSONEncode(data))
-            DeltaAPI.WriteFile(JOB_FILE, currentJobId)
-        end
-    end)
+    return dict.Labels[key] or dict.Notifs[key] or dict[key] or key
 end
 
-local function loadData()
+-- Notification System
+local function NotifyUser(title, msg, duration)
+    duration = duration or 3
+    print("[" .. title .. "] " .. msg)
+    -- Fire Roblox Notification
     pcall(function()
-        if DeltaAPI.IsFile and DeltaAPI.ReadFile and DeltaAPI.IsFile(SAVE_FILE) then
-            local data = HttpService:JSONDecode(DeltaAPI.ReadFile(SAVE_FILE))
-            if data then
-                CONFIG.SelectedTiers = data.SelectedTiers or CONFIG.SelectedTiers
-                CONFIG.FarmBoulders = data.FarmBoulders ~= nil and data.FarmBoulders or CONFIG.FarmBoulders
-                CONFIG.FarmRunes = data.FarmRunes ~= nil and data.FarmRunes or CONFIG.FarmRunes
-                totalMined = data.TotalMined or 0
-                totalRunes = data.TotalRunes or 0
-            end
-        end
-    end)
-end
-
-loadData()
-saveData()
-
---// Discord Webhook
-local function sendDiscord(msg, color)
-    if CONFIG.DiscordWebhook == "" or not DeltaAPI.HttpRequest then return end
-    pcall(function()
-        DeltaAPI.HttpRequest({
-            Url = CONFIG.DiscordWebhook,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode({
-                embeds = {{
-                    title = "🪨 Boulder Farm Delta",
-                    description = msg,
-                    color = color or 0x00FF00,
-                    footer = {text = "JobId: " .. string.sub(currentJobId, 1, 12) .. "..."},
-                    timestamp = DateTime.now():ToIsoDate()
-                }}
-            })
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title,
+            Text = msg,
+            Duration = duration
         })
     end)
 end
 
---// Anti AFK (Delta Optimized - ใช้ getconnections ปิด Idle)
-if CONFIG.AntiAFK and DeltaAPI.GetConnections then
-    pcall(function()
-        for _, conn in pairs(DeltaAPI.GetConnections(player.Idled)) do
-            if conn.Disable then conn:Disable() end
-            if conn.disconnect then conn:disconnect() end
+-- ==========================================
+-- [[ UTILITY FUNCTIONS ]] --
+-- ==========================================
+local function GetRoot(player)
+    local p = player or LP
+    local char = p.Character
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
+end
+
+local function GetHumanoid(player)
+    local p = player or LP
+    local char = p.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function GetOtherPlayers()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then table.insert(names, p.Name) end
+    end
+    if #names == 0 then table.insert(names, "None") end
+    return names
+end
+
+local function GetCrystalWeight(crystal)
+    if not crystal then return 0 end
+    local weightAttr = crystal:GetAttribute("Weight") or crystal:GetAttribute("CrystalWeight") or crystal:GetAttribute("ItemWeight")
+    if weightAttr and type(weightAttr) == "number" then return weightAttr end
+
+    local weightObj = crystal:FindFirstChild("Weight") or crystal:FindFirstChild("WeightValue")
+    if weightObj and weightObj:IsA("ValueBase") then return weightObj.Value end
+
+    local name = crystal.Name
+    local weightInName = name:match("(%d+%.?%d*)%s*kg") or name:match("Weight:%s*(%d+%.?%d*)") or name:match("(%d+%.?%d*)")
+    if weightInName then return tonumber(weightInName) or 0 end
+    return 0
+end
+
+local function IsRune(instance)
+    if not instance then return false end
+    local name = string.lower(instance.Name)
+    if name:find("rune") then return true end
+    local typeAttr = instance:GetAttribute("Type") or instance:GetAttribute("ItemType")
+    if typeAttr and string.lower(tostring(typeAttr)):find("rune") then return true end
+    return false
+end
+
+local function IsBoulder(instance)
+    if not instance then return false end
+    local name = string.lower(instance.Name)
+    if name:find("boulder") then return true end
+    local typeAttr = instance:GetAttribute("Type") or instance:GetAttribute("ItemType")
+    if typeAttr and string.lower(tostring(typeAttr)):find("boulder") then return true end
+    return false
+end
+
+local function SatisfiesWeightFilter(crystal)
+    if not States.WeightFilterEnabled then return true end
+    local weight = GetCrystalWeight(crystal)
+    return weight <= States.MaxAllowedWeight
+end
+
+local function GetNearestCrystal(filterRuneOnly)
+    if not CrystalsFolder then return nil end
+    local myRoot = GetRoot()
+    if not myRoot then return nil end
+
+    local closest = nil
+    local shortestDistance = math.huge
+
+    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
+        if crystal and crystal.Parent and not PermanentBlacklist[crystal] then
+            local isRuneMatch = filterRuneOnly and IsRune(crystal) or not filterRuneOnly
+            local isWeightOk = SatisfiesWeightFilter(crystal)
+
+            if isRuneMatch and isWeightOk then
+                local targetPart = crystal:IsA("BasePart") and crystal or crystal:FindFirstChildWhichIsA("BasePart", true)
+                if targetPart then
+                    local dist = (myRoot.Position - targetPart.Position).Magnitude
+                    if dist < shortestDistance then
+                        shortestDistance = dist
+                        closest = crystal
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- Boulder Finder
+local function GetNearestBoulder()
+    local myRoot = GetRoot()
+    if not myRoot then return nil end
+
+    local closest = nil
+    local shortestDistance = math.huge
+
+    local searchFolders = {BouldersFolder, CrystalsFolder, ThingsFolder, Workspace}
+    for _, folder in ipairs(searchFolders) do
+        if folder then
+            for _, item in ipairs(folder:GetChildren()) do
+                if item and item.Parent and IsBoulder(item) and not PermanentBlacklist[item] then
+                    local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+                    if targetPart then
+                        local dist = (myRoot.Position - targetPart.Position).Magnitude
+                        if dist < shortestDistance then
+                            shortestDistance = dist
+                            closest = item
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function CheckInventoryStatus()
+    local currentWeight = 0
+    local maxWeight = States.InventoryMaxCapacity
+
+    local weightAttr = LP:GetAttribute("Weight") or LP:GetAttribute("CurrentWeight") or LP:GetAttribute("InventoryWeight")
+    local maxAttr = LP:GetAttribute("MaxWeight") or LP:GetAttribute("MaxCapacity") or LP:GetAttribute("Capacity")
+
+    if weightAttr then currentWeight = tonumber(weightAttr) or currentWeight end
+    if maxAttr then maxWeight = tonumber(maxAttr) or maxWeight end
+
+    local ls = LP:FindFirstChild("leaderstats")
+    if ls then
+        local wVal = ls:FindFirstChild("Weight") or ls:FindFirstChild("Inventory")
+        local mVal = ls:FindFirstChild("MaxWeight") or ls:FindFirstChild("Capacity")
+        if wVal then currentWeight = wVal.Value end
+        if mVal then maxWeight = mVal.Value end
+    end
+
+    if currentWeight == 0 and LP:FindFirstChild("Backpack") then
+        currentWeight = #LP.Backpack:GetChildren()
+    end
+
+    States.CurrentInventoryWeight = currentWeight
+    States.InventoryMaxCapacity = maxWeight
+    return currentWeight, maxWeight
+end
+
+local function DropAllOresExceptRunes()
+    local backpack = LP:FindFirstChild("Backpack")
+    local char = LP.Character
+
+    local function processItem(item)
+        if item:IsA("Tool") and not IsRune(item) then
+            if DropRequest then
+                pcall(function() DropRequest:FireServer(item) end)
+            else
+                pcall(function()
+                    item.Parent = Workspace
+                    if GetRoot() then
+                        local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart")
+                        if handle then handle.CFrame = GetRoot().CFrame * CFrame.new(0, 0, -3) end
+                    end
+                end)
+            end
+        end
+    end
+
+    if backpack then for _, item in ipairs(backpack:GetChildren()) do processItem(item) end end
+    if char then for _, item in ipairs(char:GetChildren()) do processItem(item) end end
+end
+
+-- ==========================================
+-- [[ CUSTOM RESPONSIVE UI BUILDER ]] --
+-- ==========================================
+local ParentGui = (gethui and gethui()) or CoreGui or LP:WaitForChild("PlayerGui")
+
+-- Remove existing GUI if present
+if ParentGui:FindFirstChild("DaleyHub_V4_CustomUI") then
+    ParentGui.DaleyHub_V4_CustomUI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DaleyHub_V4_CustomUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = ParentGui
+
+-- Main Container Scale Manager
+local MainScale = Instance.new("UIScale")
+MainScale.Scale = 1
+MainScale.Parent = ScreenGui
+
+-- ------------------------------------------
+-- [[ 1. LANGUAGE SELECTION MODAL SCREEN ]] --
+-- ------------------------------------------
+local LangModalFrame = Instance.new("Frame")
+LangModalFrame.Name = "LangModalFrame"
+LangModalFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+LangModalFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+LangModalFrame.Size = UDim2.new(0, 420, 0, 260)
+LangModalFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+LangModalFrame.BorderSizePixel = 0
+LangModalFrame.Parent = ScreenGui
+
+local ModalCorner = Instance.new("UICorner")
+ModalCorner.CornerRadius = UDim.new(0, 16)
+ModalCorner.Parent = LangModalFrame
+
+local ModalGradient = Instance.new("UIGradient")
+ModalGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 28, 42)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 14, 20))
+}
+ModalGradient.Parent = LangModalFrame
+
+local ModalTitle = Instance.new("TextLabel")
+ModalTitle.Name = "ModalTitle"
+ModalTitle.Size = UDim2.new(1, 0, 0, 60)
+ModalTitle.Position = UDim2.new(0, 0, 0, 15)
+ModalTitle.BackgroundTransparency = 1
+ModalTitle.Font = Enum.Font.GothamBold
+ModalTitle.Text = L10N.TH.SelectLangTitle
+ModalTitle.TextColor3 = Color3.fromRGB(240, 240, 255)
+ModalTitle.TextSize = 20
+ModalTitle.Parent = LangModalFrame
+
+local BtnTH = Instance.new("TextButton")
+BtnTH.Name = "BtnTH"
+BtnTH.Position = UDim2.new(0.1, 0, 0.42, 0)
+BtnTH.Size = UDim2.new(0.8, 0, 0, 48)
+BtnTH.BackgroundColor3 = Color3.fromRGB(0, 170, 120)
+BtnTH.Font = Enum.Font.GothamBold
+BtnTH.Text = "🇹🇭  ภาษาไทย (Thai)"
+BtnTH.TextColor3 = Color3.fromRGB(255, 255, 255)
+BtnTH.TextSize = 16
+BtnTH.Parent = LangModalFrame
+
+local BtnTHCorner = Instance.new("UICorner")
+BtnTHCorner.CornerRadius = UDim.new(0, 10)
+BtnTHCorner.Parent = BtnTH
+
+local BtnEN = Instance.new("TextButton")
+BtnEN.Name = "BtnEN"
+BtnEN.Position = UDim2.new(0.1, 0, 0.68, 0)
+BtnEN.Size = UDim2.new(0.8, 0, 0, 48)
+BtnEN.BackgroundColor3 = Color3.fromRGB(70, 100, 210)
+BtnEN.Font = Enum.Font.GothamBold
+BtnEN.Text = "🇬🇧  English (ENG)"
+BtnEN.TextColor3 = Color3.fromRGB(255, 255, 255)
+BtnEN.TextSize = 16
+BtnEN.Parent = LangModalFrame
+
+local BtnENCorner = Instance.new("UICorner")
+BtnENCorner.CornerRadius = UDim.new(0, 10)
+BtnENCorner.Parent = BtnEN
+
+-- ------------------------------------------
+-- [[ 2. MAIN DASHBOARD FRAME ]] --
+-- ------------------------------------------
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainDashboard"
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+MainFrame.Size = UDim2.new(0, 720, 0, 460)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 17, 24)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false -- Hidden until language chosen
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 14)
+MainCorner.Parent = MainFrame
+
+-- Aspect Ratio Guard to Prevent UI Distortion across Screen Sizes
+local AspectConstraint = Instance.new("UIAspectRatioConstraint")
+AspectConstraint.AspectRatio = 720 / 460
+AspectConstraint.AspectType = Enum.AspectType.FitWithinMaxSize
+AspectConstraint.DominantAxis = Enum.DominantAxis.Width
+AspectConstraint.Parent = MainFrame
+
+-- Draggable Header
+local HeaderBar = Instance.new("Frame")
+HeaderBar.Name = "HeaderBar"
+HeaderBar.Size = UDim2.new(1, 0, 0, 42)
+HeaderBar.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+HeaderBar.BorderSizePixel = 0
+HeaderBar.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 14)
+HeaderCorner.Parent = HeaderBar
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Position = UDim2.new(0, 16, 0, 0)
+TitleLabel.Size = UDim2.new(0.7, 0, 1, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = L10N.TH.HubTitle
+TitleLabel.TextColor3 = Color3.fromRGB(220, 225, 245)
+TitleLabel.TextSize = 16
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = HeaderBar
+
+-- Toggle / Minimize Button
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleBtn"
+ToggleBtn.Position = UDim2.new(1, -44, 0, 6)
+ToggleBtn.Size = UDim2.new(0, 30, 0, 30)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 60)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.Text = "X"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextSize = 14
+ToggleBtn.Parent = HeaderBar
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 8)
+ToggleCorner.Parent = ToggleBtn
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+-- Make Header Draggable
+local dragging, dragInput, dragStart, startPos
+HeaderBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+HeaderBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Sidebar for Tabs
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.Position = UDim2.new(0, 8, 0, 50)
+Sidebar.Size = UDim2.new(0, 180, 1, -58)
+Sidebar.BackgroundColor3 = Color3.fromRGB(20, 22, 32)
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = MainFrame
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 10)
+SidebarCorner.Parent = Sidebar
+
+local SidebarList = Instance.new("UIListLayout")
+SidebarList.Padding = UDim.new(0, 6)
+SidebarList.SortOrder = Enum.SortOrder.LayoutOrder
+SidebarList.Parent = Sidebar
+
+local SidebarPadding = Instance.new("UIPadding")
+SidebarPadding.PaddingTop = UDim.new(0, 8)
+SidebarPadding.PaddingLeft = UDim.new(0, 8)
+SidebarPadding.PaddingRight = UDim.new(0, 8)
+SidebarPadding.Parent = Sidebar
+
+-- Content Container
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Name = "ContentContainer"
+ContentContainer.Position = UDim2.new(0, 196, 0, 50)
+ContentContainer.Size = UDim2.new(1, -204, 1, -58)
+ContentContainer.BackgroundColor3 = Color3.fromRGB(20, 22, 32)
+ContentContainer.BorderSizePixel = 0
+ContentContainer.Parent = MainFrame
+
+local ContentCorner = Instance.new("UICorner")
+ContentCorner.CornerRadius = UDim.new(0, 10)
+ContentCorner.Parent = ContentContainer
+
+-- Create Scrolling Frames for Tabs
+local TabFrames = {}
+local TabButtons = {}
+
+local TabKeys = {"Locomotion", "Mining", "BoulderRune", "Inventory", "Visuals", "Settings"}
+
+for idx, tabKey in ipairs(TabKeys) do
+    -- Tab Button
+    local tabBtn = Instance.new("TextButton")
+    tabBtn.Name = "TabBtn_" .. tabKey
+    tabBtn.Size = UDim2.new(1, 0, 0, 40)
+    tabBtn.BackgroundColor3 = idx == 1 and Color3.fromRGB(45, 55, 80) or Color3.fromRGB(26, 30, 44)
+    tabBtn.Font = Enum.Font.GothamSemibold
+    tabBtn.Text = L10N.TH.Tabs[tabKey]
+    tabBtn.TextColor3 = Color3.fromRGB(220, 225, 245)
+    tabBtn.TextSize = 13
+    tabBtn.LayoutOrder = idx
+    tabBtn.Parent = Sidebar
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = tabBtn
+
+    -- Tab Scrolling Frame Content
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name = "Scroll_" .. tabKey
+    scroll.Size = UDim2.new(1, -12, 1, -12)
+    scroll.Position = UDim2.new(0, 6, 0, 6)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 5
+    scroll.Visible = (idx == 1)
+    scroll.Parent = ContentContainer
+
+    local list = Instance.new("UIListLayout")
+    list.Padding = UDim.new(0, 8)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Parent = scroll
+
+    TabFrames[tabKey] = scroll
+    TabButtons[tabKey] = tabBtn
+
+    tabBtn.MouseButton1Click:Connect(function()
+        for k, f in pairs(TabFrames) do f.Visible = (k == tabKey) end
+        for k, b in pairs(TabButtons) do
+            b.BackgroundColor3 = (k == tabKey) and Color3.fromRGB(45, 55, 80) or Color3.fromRGB(26, 30, 44)
         end
     end)
-else
-    -- Fallback
-    player.Idled:Connect(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-    end)
 end
 
---// Auto Rejoin Queue (Delta queue_on_teleport)
-if CONFIG.AutoLoadOnTeleport and DeltaAPI.QueueTeleport then
-    pcall(function()
-        local scriptURL = "PASTE_YOUR_SCRIPT_URL_HERE" -- เปลี่ยนเป็น URL ของสคริปต์คุณ
-        DeltaAPI.QueueTeleport([[
-            wait(4)
-            loadstring(game:HttpGet("]] .. scriptURL .. [["))()
-        ]])
-    end)
-end
+-- ==========================================
+-- [[ UI COMPONENT GENERATOR HELPERS ]] --
+-- ==========================================
+local ElementLabels = {} -- Stores labels for dynamic translation updates
 
---// UI Setup
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "DeltaBoulderFarmV3"
-screenGui.ResetOnSpawn = false
+local function CreateToggle(parentTab, labelKey, stateKey, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -8, 0, 38)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 32, 48)
+    frame.BorderSizePixel = 0
+    frame.Parent = parentTab
 
--- Delta ProtectGui
-if DeltaAPI.ProtectGui then
-    DeltaAPI.ProtectGui(screenGui)
-else
-    screenGui.Parent = player:WaitForChild("PlayerGui")
-end
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 340, 0, 460)
-mainFrame.Position = UDim2.new(0.8, -170, 0.03, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
-mainFrame.BorderSizePixel = 0
-mainFrame.BackgroundTransparency = 0.02
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
+    local txt = Instance.new("TextLabel")
+    txt.Position = UDim2.new(0, 12, 0, 0)
+    txt.Size = UDim2.new(0.7, 0, 1, 0)
+    txt.BackgroundTransparency = 1
+    txt.Font = Enum.Font.GothamSemibold
+    txt.Text = Text(labelKey)
+    txt.TextColor3 = Color3.fromRGB(210, 215, 235)
+    txt.TextSize = 13
+    txt.TextXAlignment = Enum.TextXAlignment.Left
+    txt.Parent = frame
 
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 14)
+    table.insert(ElementLabels, {LabelObj = txt, Key = labelKey})
 
-local stroke = Instance.new("UIStroke", mainFrame)
-stroke.Color = Color3.fromRGB(0, 200, 255)
-stroke.Thickness = 2.5
-
-local title = Instance.new("TextLabel", mainFrame)
-title.Size = UDim2.new(1, 0, 0, 42)
-title.BackgroundColor3 = Color3.fromRGB(0, 80, 160)
-title.Text = "🪨 Delta Boulder & Rune Farm"
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 17
-Instance.new("UICorner", title).CornerRadius = UDim.new(0, 12)
-
---// Toggle Builder
-local function createToggle(name, posY, defaultState, callback)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.88, 0, 0, 30)
-    btn.Position = UDim2.new(0.06, 0, 0, posY)
-    btn.BackgroundColor3 = defaultState and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(180, 50, 50)
-    btn.Text = (defaultState and "✅ " or "❌ ") .. name
-    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Position = UDim2.new(1, -60, 0.5, -12)
+    btn.Size = UDim2.new(0, 48, 0, 24)
+    btn.BackgroundColor3 = States[stateKey] and Color3.fromRGB(0, 190, 110) or Color3.fromRGB(60, 65, 85)
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 14
-    btn.Parent = mainFrame
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+    btn.Text = States[stateKey] and "ON" or "OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 12
+    btn.Parent = frame
 
-    local state = defaultState
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 12)
+    btnCorner.Parent = btn
+
     btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(180, 50, 50)
-        btn.Text = (state and "✅ " or "❌ ") .. name
-        callback(state)
-        saveData()
+        States[stateKey] = not States[stateKey]
+        btn.BackgroundColor3 = States[stateKey] and Color3.fromRGB(0, 190, 110) or Color3.fromRGB(60, 65, 85)
+        btn.Text = States[stateKey] and "ON" or "OFF"
+        if callback then callback(States[stateKey]) end
+    end)
+    return frame
+end
+
+local function CreateButton(parentTab, labelKey, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -8, 0, 38)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 50, 75)
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = Text(labelKey)
+    btn.TextColor3 = Color3.fromRGB(230, 235, 255)
+    btn.TextSize = 13
+    btn.Parent = parentTab
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+
+    table.insert(ElementLabels, {LabelObj = btn, Key = labelKey})
+
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
     end)
     return btn
 end
 
-createToggle("🪨 Farm Boulders", 52, CONFIG.FarmBoulders, function(v) CONFIG.FarmBoulders = v end)
-createToggle("🔮 Farm Runes", 86, CONFIG.FarmRunes, function(v) CONFIG.FarmRunes = v end)
-createToggle("🔄 Auto Rejoin", 120, CONFIG.AutoRejoin, function(v) CONFIG.AutoRejoin = v end)
-createToggle("🛡️ Anti AFK", 154, CONFIG.AntiAFK, function(v) CONFIG.AntiAFK = v end)
+local function CreateSlider(parentTab, labelKey, minVal, maxVal, defaultVal, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -8, 0, 48)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 32, 48)
+    frame.BorderSizePixel = 0
+    frame.Parent = parentTab
 
---// Tier Selector
-local tierFrame = Instance.new("Frame", mainFrame)
-tierFrame.Size = UDim2.new(0.88, 0, 0, 145)
-tierFrame.Position = UDim2.new(0.06, 0, 0, 192)
-tierFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
-tierFrame.BorderSizePixel = 0
-Instance.new("UICorner", tierFrame).CornerRadius = UDim.new(0, 10)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
 
-local tierTitle = Instance.new("TextLabel", tierFrame)
-tierTitle.Size = UDim2.new(1, 0, 0, 24)
-tierTitle.BackgroundTransparency = 1
-tierTitle.Text = "⭐ เลือกระดับ Boulder"
-tierTitle.TextColor3 = Color3.fromRGB(255, 220, 80)
-tierTitle.Font = Enum.Font.GothamBold
-tierTitle.TextSize = 14
+    local txt = Instance.new("TextLabel")
+    txt.Position = UDim2.new(0, 12, 0, 4)
+    txt.Size = UDim2.new(0.7, 0, 0, 20)
+    txt.BackgroundTransparency = 1
+    txt.Font = Enum.Font.GothamSemibold
+    txt.Text = Text(labelKey) .. ": " .. tostring(defaultVal)
+    txt.TextColor3 = Color3.fromRGB(210, 215, 235)
+    txt.TextSize = 12
+    txt.TextXAlignment = Enum.TextXAlignment.Left
+    txt.Parent = frame
 
-for i = 1, 6 do
-    local btn = Instance.new("TextButton", tierFrame)
-    btn.Size = UDim2.new(0.30, 0, 0, 28)
-    btn.Position = UDim2.new(((i-1)%3)*0.33 + 0.02, 0, math.floor((i-1)/3)*0.32 + 0.20, 0)
-    btn.BackgroundColor3 = CONFIG.TierColors[i]
-    btn.Text = CONFIG.TierNames[i]
-    btn.TextColor3 = Color3.new(1,1,1)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 12
-    btn.TextStrokeTransparency = 0.4
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    table.insert(ElementLabels, {LabelObj = txt, Key = labelKey, IsSlider = true, Min = minVal, Max = maxVal, Val = defaultVal})
 
-    local selected = CONFIG.SelectedTiers[i]
-    local stroke2 = Instance.new("UIStroke", btn)
-    stroke2.Color = Color3.new(1,1,1)
-    stroke2.Thickness = selected and 2.5 or 0
-    btn.BackgroundTransparency = selected and 0 or 0.5
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Position = UDim2.new(0, 12, 0, 28)
+    sliderBg.Size = UDim2.new(1, -24, 0, 10)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(45, 50, 70)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
 
-    btn.MouseButton1Click:Connect(function()
-        selected = not selected
-        CONFIG.SelectedTiers[i] = selected
-        btn.BackgroundTransparency = selected and 0 or 0.5
-        stroke2.Thickness = selected and 2.5 or 0
-        saveData()
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 5)
+    bgCorner.Parent = sliderBg
+
+    local fill = Instance.new("Frame")
+    local initRatio = (defaultVal - minVal) / (maxVal - minVal)
+    fill.Size = UDim2.new(initRatio, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 170, 240)
+    fill.BorderSizePixel = 0
+    fill.Parent = sliderBg
+
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 5)
+    fillCorner.Parent = fill
+
+    local sliding = false
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+        end
     end)
-end
-
---// Stats Labels
-local statusLabel = Instance.new("TextLabel", mainFrame)
-statusLabel.Size = UDim2.new(0.88, 0, 0, 20)
-statusLabel.Position = UDim2.new(0.06, 0, 0, 345)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "⏹️ สถานะ: ปิดอยู่"
-statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-statusLabel.Font = Enum.Font.GothamBold
-statusLabel.TextSize = 13
-
-local countLabel = Instance.new("TextLabel", mainFrame)
-countLabel.Size = UDim2.new(0.88, 0, 0, 18)
-countLabel.Position = UDim2.new(0.06, 0, 0, 367)
-countLabel.BackgroundTransparency = 1
-countLabel.Text = "🪨 Boulders: 0 | 🔮 Runes: 0"
-countLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-countLabel.Font = Enum.Font.Gotham
-countLabel.TextSize = 11
-
-local statsLabel = Instance.new("TextLabel", mainFrame)
-statsLabel.Size = UDim2.new(0.88, 0, 0, 18)
-statsLabel.Position = UDim2.new(0.06, 0, 0, 385)
-statsLabel.BackgroundTransparency = 1
-statsLabel.Text = "⛏️ ขุดแล้ว: 0 | ⏱️ 0m 0s"
-statsLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-statsLabel.Font = Enum.Font.Gotham
-countLabel.TextSize = 11
-
-local serverLabel = Instance.new("TextLabel", mainFrame)
-serverLabel.Size = UDim2.new(0.88, 0, 0, 16)
-serverLabel.Position = UDim2.new(0.06, 0, 0, 403)
-serverLabel.BackgroundTransparency = 1
-serverLabel.Text = "🌐 " .. string.sub(currentJobId, 1, 10) .. "..."
-serverLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
-serverLabel.Font = Enum.Font.Gotham
-serverLabel.TextSize = 10
-
-local infoLabel = Instance.new("TextLabel", mainFrame)
-infoLabel.Size = UDim2.new(0.88, 0, 0, 18)
-infoLabel.Position = UDim2.new(0.06, 0, 0, 435)
-infoLabel.BackgroundTransparency = 1
-infoLabel.Text = "⌨️ กด RightShift เพื่อ เปิด/ปิด"
-infoLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextSize = 11
-
---// ฟังก์ชันหา Boulder Tier
-local function getBoulderTier(boulder)
-    local name = boulder.Name:lower()
-
-    -- ตรวจจาก Attribute
-    local attrTier = boulder:GetAttribute("Tier") or boulder:GetAttribute("Rarity") or boulder:GetAttribute("Level")
-    if attrTier then
-        return math.clamp(tonumber(attrTier) or 1, 1, 6)
-    end
-
-    -- ตรวจจากชื่อ
-    for tier, keywords in ipairs(CONFIG.TierKeywords) do
-        for _, kw in ipairs(keywords) do
-            if name:find(kw:lower()) then
-                return tier
-            end
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
         end
-    end
-
-    -- ตรวจจากสี (ถ้ามี)
-    if boulder:IsA("BasePart") then
-        local color = boulder.Color
-        -- สามารถเพิ่ม logic ตรวจสีได้ที่นี่
-    end
-
-    return 1
-end
-
---// ฟังก์ชันหา Targets
-local function getDistance(part)
-    return (hrp.Position - part.Position).Magnitude
-end
-
-local function findBoulders()
-    local found = {}
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Parent then
-            local isBoulder = false
-            for _, keyword in ipairs({"Boulder", "Rock", "Stone", "Ore", "Mineral", "Deposit"}) do
-                if obj.Name:match(keyword) then
-                    isBoulder = true
-                    break
-                end
-            end
-            if isBoulder then
-                local isBarrier = false
-                pcall(function()
-                    if obj:IsDescendantOf(Workspace:FindFirstChild("Barriers")) then
-                        isBarrier = true
-                    end
-                end)
-                if not isBarrier and getDistance(obj) <= CONFIG.SearchRadius then
-                    local tier = getBoulderTier(obj)
-                    if CONFIG.SelectedTiers[tier] then
-                        table.insert(found, {Part = obj, Tier = tier, Distance = getDistance(obj)})
-                    end
-                end
-            end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local mousePos = input.Position.X
+            local bgPos = sliderBg.AbsolutePosition.X
+            local bgWidth = sliderBg.AbsoluteSize.X
+            local rel = math.clamp((mousePos - bgPos) / bgWidth, 0, 1)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            local val = math.floor(minVal + (maxVal - minVal) * rel)
+            txt.Text = Text(labelKey) .. ": " .. tostring(val)
+            if callback then callback(val) end
         end
-    end
-    table.sort(found, function(a, b) return a.Distance < b.Distance end)
-    return found
+    end)
+    return frame
 end
 
-local function findRunes()
-    local found = {}
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if (obj:IsA("BasePart") or obj:IsA("MeshPart")) and obj.Name:match("Rune$") then
-            if obj.Parent and obj.Parent:IsDescendantOf(Workspace) then
-                if getDistance(obj) <= CONFIG.SearchRadius then
-                    table.insert(found, obj)
-                end
-            end
-        end
-    end
-    table.sort(found, function(a, b) return getDistance(a) < getDistance(b) end)
-    return found
-end
+-- Update all UI Labels dynamically when language changes
+local function UpdateUILanguage()
+    TitleLabel.Text = Text("HubTitle")
+    ModalTitle.Text = L10N[CurrentLang].SelectLangTitle
 
---// Tween & Actions
-local function tweenToPart(part, offset)
-    if not part or not part.Parent then return false end
-    local targetPos = part.Position + offset
-    local distance = (hrp.Position - targetPos).Magnitude
-    if distance < 4 then return true end
-
-    local tweenInfo = TweenInfo.new(
-        math.clamp(distance / CONFIG.TeleportSpeed, 0.08, 3),
-        Enum.EasingStyle.Linear
-    )
-    local targetCFrame = CFrame.lookAt(targetPos, part.Position)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-    return true
-end
-
-local function equipPickaxe()
-    local backpack = player:WaitForChild("Backpack")
-    for _, toolName in ipairs(CONFIG.PickaxeNames) do
-        local tool = backpack:FindFirstChild(toolName)
-        if tool and tool:IsA("Tool") then
-            humanoid:EquipTool(tool)
-            wait(0.15)
-            return character:FindFirstChild(toolName)
-        end
-    end
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.Name:lower():match("pick") or tool.Name:lower():match("axe")) then
-            humanoid:EquipTool(tool)
-            wait(0.15)
-            return character:FindFirstChild(tool.Name)
-        end
-    end
-    return nil
-end
-
-local function collectRune(runePart)
-    if not runePart or not runePart.Parent then return end
-
-    -- Delta firetouchinterest
-    if DeltaAPI.FireTouch then
-        pcall(function()
-            DeltaAPI.FireTouch(hrp, runePart, 0)
-            wait(0.03)
-            DeltaAPI.FireTouch(hrp, runePart, 1)
-        end)
+    for k, b in pairs(TabButtons) do
+        b.Text = L10N[CurrentLang].Tabs[k]
     end
 
-    -- Teleport into rune
-    hrp.CFrame = CFrame.new(runePart.Position + Vector3.new(0, 1.5, 0))
-    wait(0.08)
-
-    -- Delta fireproximityprompt
-    if DeltaAPI.FirePrompt then
-        for _, prompt in ipairs(runePart:GetDescendants()) do
-            if prompt:IsA("ProximityPrompt") then
-                pcall(function() DeltaAPI.FirePrompt(prompt) end)
-                break
-            end
-        end
-    end
-end
-
-local function digBoulder(boulder)
-    if CONFIG.AutoEquipPickaxe then
-        if not equipPickaxe() then
-            warn("[DeltaFarm] ไม่พบ Pickaxe ใน Backpack!")
-            return
-        end
-    end
-
-    local tool = character:FindFirstChildOfClass("Tool")
-    if not tool then return end
-
-    local attempts = 0
-    while boulder and boulder.Parent and attempts < 80 do
-        if not _G.AutoFarmEnabled then break end
-
-        hrp.CFrame = CFrame.lookAt(hrp.Position, boulder.Position)
-        tool:Activate()
-
-        -- Delta optimized clicking
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-        RunService.Heartbeat:Wait()
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-
-        wait(CONFIG.DigDelay)
-        attempts = attempts + 1
-
-        if boulder and boulder.Parent and boulder:IsDescendantOf(Workspace) then
-            if (hrp.Position - boulder.Position).Magnitude > 8 then
-                tweenToPart(boulder, CONFIG.BoulderOffset)
-            end
+    for _, entry in ipairs(ElementLabels) do
+        if entry.IsSlider then
+            entry.LabelObj.Text = Text(entry.Key) .. ": " .. tostring(entry.Val or 0)
         else
-            totalMined = totalMined + 1
-            saveData()
-            break
+            entry.LabelObj.Text = Text(entry.Key)
         end
     end
 end
 
---// Auto Rejoin
-local function rejoinServer()
-    if not CONFIG.AutoRejoin then return end
+-- Modal Language Selection Buttons
+BtnTH.MouseButton1Click:Connect(function()
+    CurrentLang = "TH"
+    UpdateUILanguage()
+    LangModalFrame.Visible = false
+    MainFrame.Visible = true
+    NotifyUser("Daley Hub", Text("SwitchedLang"), 3)
+end)
 
-    statusLabel.Text = "🔄 กำลังรีจอยเซิร์ฟเวอร์..."
-    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+BtnEN.MouseButton1Click:Connect(function()
+    CurrentLang = "EN"
+    UpdateUILanguage()
+    LangModalFrame.Visible = false
+    MainFrame.Visible = true
+    NotifyUser("Daley Hub", Text("SwitchedLang"), 3)
+end)
 
-    saveData()
+-- Floating Toggle Button for Quick Show/Hide
+local FloatBtn = Instance.new("TextButton")
+FloatBtn.Name = "DaleyHub_FloatBtn"
+FloatBtn.Position = UDim2.new(0, 15, 0.4, 0)
+FloatBtn.Size = UDim2.new(0, 48, 0, 48)
+FloatBtn.BackgroundColor3 = Color3.fromRGB(30, 35, 55)
+FloatBtn.Font = Enum.Font.GothamBold
+FloatBtn.Text = "💎"
+FloatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+FloatBtn.TextSize = 22
+FloatBtn.Parent = ScreenGui
 
-    if CONFIG.NotifyOnRejoin then
-        local elapsed = tick() - sessionStart
-        local mins = math.floor(elapsed / 60)
-        local secs = math.floor(elapsed % 60)
-        sendDiscord(
-            "🔄 **รีจอยเซิร์ฟเวอร์**\n" ..
-            "⛏️ ขุดไปแล้ว: " .. totalMined .. " boulders\n" ..
-            "🔮 เก็บไปแล้ว: " .. totalRunes .. " runes\n" ..
-            "⏱️ เวลา: " .. mins .. "m " .. secs .. "s\n" ..
-            "🌐 JobId: `" .. currentJobId .. "`",
-            0xFFA500
-        )
+local FloatCorner = Instance.new("UICorner")
+FloatCorner.CornerRadius = UDim.new(0, 24)
+FloatCorner.Parent = FloatBtn
+
+FloatBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+-- ==========================================
+-- [[ TAB 1: LOCOMOTION & FLY ]] --
+-- ==========================================
+local TabLoco = TabFrames["Locomotion"]
+CreateToggle(TabLoco, "CFrameSpeed", "SpeedEnabled")
+CreateSlider(TabLoco, "WalkSpeedScale", 16, 250, 50, function(v) States.SpeedValue = v end)
+CreateToggle(TabLoco, "FlyMode", "FlyEnabled", function(v)
+    local hum = GetHumanoid()
+    if not v and hum then hum.PlatformStand = false end
+end)
+CreateSlider(TabLoco, "FlySpeedScale", 10, 250, 50, function(v) States.FlySpeed = v end)
+CreateToggle(TabLoco, "FloatMode", "FloatEnabled")
+CreateSlider(TabLoco, "FloatHeight", 0, 20, 5, function(v) States.FloatHeight = v end)
+CreateToggle(TabLoco, "Noclip", "NoclipEnabled")
+
+-- ==========================================
+-- [[ TAB 2: MINING & FAST DIG ]] --
+-- ==========================================
+local TabMine = TabFrames["Mining"]
+CreateToggle(TabMine, "AutoDig", "AutoDigEnabled")
+CreateToggle(TabMine, "FastDig", "FastDigEnabled")
+CreateSlider(TabMine, "FastDigDelay", 0, 10, 5, function(v) States.FastDigDelay = v / 100 end)
+CreateToggle(TabMine, "AutoSellAll", "AutoSellEnabled")
+CreateToggle(TabMine, "AutoMineCrystal", "AutoCrystal", function(v) if not v then States.CurrentCrystal = nil end end)
+CreateButton(TabMine, "TpNearestCrystal", function()
+    local target = GetNearestCrystal(false)
+    local root = GetRoot()
+    if target and root then
+        local p = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
+        if p then root.CFrame = CFrame.new(p.Position + Vector3.new(0, 2, 0)) end
     end
-
-    wait(CONFIG.RejoinDelay)
-
-    -- Method 1: Teleport to same instance
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(placeId, currentJobId, player)
-    end)
-
-    wait(2)
-
-    -- Method 2: Fallback to normal teleport
-    pcall(function()
-        TeleportService:Teleport(placeId, player)
-    end)
-end
-
---// Update Stats Loop
-spawn(function()
-    while true do
-        wait(1)
-        if _G.AutoFarmEnabled then
-            local elapsed = tick() - sessionStart
-            local mins = math.floor(elapsed / 60)
-            local secs = math.floor(elapsed % 60)
-            statsLabel.Text = "⛏️ ขุดแล้ว: " .. totalMined .. " | ⏱️ " .. mins .. "m " .. secs .. "s"
-        end
+end)
+CreateSlider(TabMine, "HoldTime", 0, 15, 5, function(v) States.CrystalHoldTime = v end)
+CreateButton(TabMine, "NextCrystal", function() if States.CurrentCrystal then States.SkipCurrent = true end end)
+CreateButton(TabMine, "BlacklistCrystal", function()
+    if States.CurrentCrystal then
+        PermanentBlacklist[States.CurrentCrystal] = true
+        States.CurrentCrystal = nil
     end
 end)
 
---// Main Farm Loop
-local function farmLoop()
-    while _G.AutoFarmEnabled do
-        if not character or not hrp or not humanoid or humanoid.Health <= 0 then
-            character = player.Character or player.CharacterAdded:Wait()
-            hrp = character:WaitForChild("HumanoidRootPart")
-            humanoid = character:WaitForChild("Humanoid")
-            wait(2)
-        end
+-- ==========================================
+-- [[ TAB 3: BOULDER & RUNE FINDER + X-RAY ]] --
+-- ==========================================
+local TabBR = TabFrames["BoulderRune"]
 
-        local didSomething = false
-
-        -- นับ Boulder
-        local allBoulders = findBoulders()
-        boulderCount = #allBoulders
-        countLabel.Text = "🪨 Boulders: " .. boulderCount .. " | 🔮 Runes: " .. totalRunes
-
-        -- Check rejoin
-        if CONFIG.AutoRejoin and boulderCount <= CONFIG.MinBouldersBeforeRejoin then
-            statusLabel.Text = "⚠️ Boulder หมด! รีจอยใน " .. CONFIG.RejoinDelay .. " วิ..."
-            statusLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
-            wait(1)
-            rejoinServer()
-            return
-        end
-
-        -- Farm Runes
-        if CONFIG.FarmRunes then
-            statusLabel.Text = "🔮 กำลังหา Rune..."
-            statusLabel.TextColor3 = Color3.fromRGB(80, 170, 255)
-            local runes = findRunes()
-            for _, rune in ipairs(runes) do
-                if not _G.AutoFarmEnabled then break end
-                if rune and rune.Parent and rune:IsDescendantOf(Workspace) then
-                    statusLabel.Text = "🔮 เก็บ " .. rune.Name
-                    if tweenToPart(rune, CONFIG.RuneOffset) then
-                        collectRune(rune)
-                        totalRunes = totalRunes + 1
-                        didSomething = true
-                        wait(CONFIG.RuneCollectDelay)
-                    end
-                end
-            end
-        end
-
-        -- Farm Boulders
-        if CONFIG.FarmBoulders then
-            statusLabel.Text = "🪨 กำลังหา Boulder..."
-            statusLabel.TextColor3 = Color3.fromRGB(255, 170, 80)
-            for _, data in ipairs(allBoulders) do
-                if not _G.AutoFarmEnabled then break end
-                local boulder = data.Part
-                if boulder and boulder.Parent and boulder:IsDescendantOf(Workspace) then
-                    local tierName = CONFIG.TierNames[data.Tier] or "?"
-                    statusLabel.Text = "🪨 ขุด " .. boulder.Name .. " [" .. tierName .. "]"
-                    statusLabel.TextColor3 = CONFIG.TierColors[data.Tier] or Color3.new(1,1,1)
-                    if tweenToPart(boulder, CONFIG.BoulderOffset) then
-                        digBoulder(boulder)
-                        didSomething = true
-                        wait(0.2)
-                    end
-                end
-            end
-        end
-
-        if not didSomething then
-            statusLabel.Text = "⏳ รอ Target..."
-            statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-            wait(2)
-        end
-
-        RunService.Heartbeat:Wait()
+-- Boulder X-Ray & ESP System
+CreateToggle(TabBR, "BoulderESP", "BoulderESP", function(v)
+    for item, hl in pairs(Boulder_ESP_Cache) do
+        if hl then hl.Enabled = v end
     end
+end)
 
-    statusLabel.Text = "⏹️ สถานะ: ปิดอยู่"
-    statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    isFarming = false
-end
-
---// Toggle
-local function toggleFarm()
-    _G.AutoFarmEnabled = not _G.AutoFarmEnabled
-    if _G.AutoFarmEnabled then
-        if not isFarming then
-            isFarming = true
-            sessionStart = tick()
-            statusLabel.Text = "▶️ สถานะ: เริ่มทำงาน..."
-            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
-            if CONFIG.NotifyOnRejoin then
-                sendDiscord("🟢 **เริ่มฟาร์ม** บนเซิร์ฟเวอร์", 0x00FF00)
-            end
-            spawn(farmLoop)
+CreateButton(TabBR, "TpNearestBoulder", function()
+    local target = GetNearestBoulder()
+    local root = GetRoot()
+    if target and root then
+        local p = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
+        if p then
+            root.CFrame = CFrame.new(p.Position + Vector3.new(0, 2, 0))
+            NotifyUser("Boulder", Text("Warped"), 2)
         end
     else
-        statusLabel.Text = "⏹️ กำลังปิด..."
-        saveData()
-    end
-end
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == CONFIG.ToggleKey then
-        toggleFarm()
+        NotifyUser("Boulder", Text("NotFound"), 2)
     end
 end)
 
---// ปุ่มเปิด/ปิด บน UI (สำรอง)
-local toggleBtn = Instance.new("TextButton", mainFrame)
-toggleBtn.Size = UDim2.new(0.4, 0, 0, 26)
-toggleBtn.Position = UDim2.new(0.3, 0, 0, 52)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
-toggleBtn.Text = "▶️ START"
-toggleBtn.TextColor3 = Color3.new(1,1,1)
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 13
-toggleBtn.Visible = false
+CreateToggle(TabBR, "AutoMineBoulder", "AutoBoulderFarm")
 
-print("========================================")
-print("🪨 Delta Boulder & Rune Farm v3.0")
-print("✅ โหลดสำเร็จ!")
-print("⌨️ กด RightShift เพื่อเปิด/ปิด")
-print("🔄 Auto Rejoin: " .. tostring(CONFIG.AutoRejoin))
-print("🛡️ Anti AFK: " .. tostring(CONFIG.AntiAFK))
-print("========================================")
+-- Rune X-Ray & ESP System
+CreateToggle(TabBR, "RuneESP", "RuneESP", function(v)
+    for crystal, hl in pairs(Crystal_ESP_Cache) do
+        if hl and IsRune(crystal) then hl.Enabled = v or States.CrystalESP end
+    end
+end)
+
+CreateButton(TabBR, "TpNearestRune", function()
+    local target = GetNearestCrystal(true)
+    local root = GetRoot()
+    if target and root then
+        local p = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
+        if p then
+            root.CFrame = CFrame.new(p.Position + Vector3.new(0, 2, 0))
+            NotifyUser("Rune", Text("Warped"), 2)
+        end
+    else
+        NotifyUser("Rune", Text("NotFound"), 2)
+    end
+end)
+
+CreateToggle(TabBR, "AutoMineRune", "AutoRuneFarm")
+
+-- ==========================================
+-- [[ TAB 4: INVENTORY & WEIGHT ]] --
+-- ==========================================
+local TabInv = TabFrames["Inventory"]
+CreateToggle(TabInv, "WeightFilter", "WeightFilterEnabled")
+CreateSlider(TabInv, "MaxWeight", 10, 500, 100, function(v) States.MaxAllowedWeight = v end)
+CreateToggle(TabInv, "AutoSellFull", "AutoSellWhenFull")
+CreateButton(TabInv, "DropOresKeepRunes", function()
+    DropAllOresExceptRunes()
+    NotifyUser("Inventory", Text("Cleaned"), 2)
+end)
+CreateToggle(TabInv, "AutoDropExceptRunes", "AutoDropExceptRunes")
+CreateToggle(TabInv, "AutoCollectOres", "AutoCollectOres")
+
+-- ==========================================
+-- [[ TAB 5: VISUALS & PLAYERS ]] --
+-- ==========================================
+local TabVis = TabFrames["Visuals"]
+CreateToggle(TabVis, "PlayerESP", "PlayerESP", function(v)
+    for _, container in pairs(Player_ESP_Cache) do
+        if container.Highlight then container.Highlight.Enabled = v end
+    end
+end)
+CreateToggle(TabVis, "CrystalESP", "CrystalESP", function(v)
+    for _, hl in pairs(Crystal_ESP_Cache) do if hl then hl.Enabled = v end end
+end)
+
+CreateButton(TabVis, "TpToPlayer", function()
+    if States.SelectedPlayer then
+        local targetPlr = Players:FindFirstChild(States.SelectedPlayer)
+        local myRoot = GetRoot()
+        local tRoot = GetRoot(targetPlr)
+        if myRoot and tRoot then myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3) end
+    end
+end)
+
+CreateButton(TabVis, "BringPlayer", function()
+    if States.SelectedPlayer then
+        local targetPlr = Players:FindFirstChild(States.SelectedPlayer)
+        local myRoot = GetRoot()
+        local tRoot = GetRoot(targetPlr)
+        if myRoot and tRoot then pcall(function() tRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3) end) end
+    end
+end)
+
+-- ==========================================
+-- [[ TAB 6: COORDS & SETTINGS ]] --
+-- ==========================================
+local TabSet = TabFrames["Settings"]
+local PosLabel = Instance.new("TextLabel")
+PosLabel.Size = UDim2.new(1, -8, 0, 30)
+PosLabel.BackgroundTransparency = 1
+PosLabel.Font = Enum.Font.GothamSemibold
+PosLabel.Text = "Current Location: X:0, Y:0, Z:0"
+PosLabel.TextColor3 = Color3.fromRGB(200, 205, 230)
+PosLabel.TextSize = 12
+PosLabel.Parent = TabSet
+
+CreateButton(TabSet, "TpSpawn", function()
+    local root = GetRoot()
+    if root then root.CFrame = CFrame.new(Vector3.new(-13.78, 29.22, 1075.75)) end
+end)
+
+CreateButton(TabSet, "CopyCoords", function()
+    local root = GetRoot()
+    if root then
+        local pos = root.Position
+        local str = string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z)
+        if setclipboard then setclipboard(str) NotifyUser("Coords", Text("Copied"), 2) end
+    end
+end)
+
+CreateButton(TabSet, "SwitchLang", function()
+    CurrentLang = (CurrentLang == "TH") and "EN" or "TH"
+    UpdateUILanguage()
+    NotifyUser("Language", Text("SwitchedLang"), 2)
+end)
+
+CreateSlider(TabSet, "UIScale", 5, 15, 10, function(v)
+    MainScale.Scale = v / 10
+end)
+
+-- ==========================================
+-- [[ BOULDER X-RAY ESP ENGINE ]] --
+-- ==========================================
+local function CreateBoulderESP(boulder)
+    if Boulder_ESP_Cache[boulder] then return end
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "DaleyKavo_BoulderHighlight"
+    hl.FillColor = Color3.fromRGB(255, 140, 0) -- Glowing Amber/Orange
+    hl.FillTransparency = 0.3
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- Full X-Ray effect through walls!
+    hl.Adornee = boulder
+    hl.Enabled = States.BoulderESP
+    hl.Parent = boulder
+
+    Boulder_ESP_Cache[boulder] = hl
+end
+
+local function RemoveBoulderESP(boulder)
+    if Boulder_ESP_Cache[boulder] then
+        pcall(function() Boulder_ESP_Cache[boulder]:Destroy() end)
+        Boulder_ESP_Cache[boulder] = nil
+    end
+end
+
+-- Scan and Register Boulders
+local function ScanBoulders()
+    local searchFolders = {BouldersFolder, CrystalsFolder, ThingsFolder, Workspace}
+    for _, folder in ipairs(searchFolders) do
+        if folder then
+            for _, item in ipairs(folder:GetChildren()) do
+                if IsBoulder(item) then CreateBoulderESP(item) end
+            end
+            folder.ChildAdded:Connect(function(child)
+                if IsBoulder(child) then CreateBoulderESP(child) end
+            end)
+            folder.ChildRemoved:Connect(RemoveBoulderESP)
+        end
+    end
+end
+task.spawn(ScanBoulders)
+
+-- ==========================================
+-- [[ PLAYER & CRYSTAL ESP INITIALIZERS ]] --
+-- ==========================================
+local function CreatePlayerESP(player)
+    if player == LP or Player_ESP_Cache[player] then return end
+    local container = {}
+    local function applyESP(char)
+        if not char then return end
+        if container.Highlight then pcall(function() container.Highlight:Destroy() end) end
+        local hl = Instance.new("Highlight")
+        hl.Name = "DaleyKavo_PlayerHighlight"
+        hl.FillColor = Color3.fromRGB(0, 255, 150)
+        hl.FillTransparency = 0.5
+        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+        hl.Adornee = char
+        hl.Enabled = States.PlayerESP
+        hl.Parent = char
+        container.Highlight = hl
+    end
+    if player.Character then applyESP(player.Character) end
+    player.CharacterAdded:Connect(applyESP)
+    Player_ESP_Cache[player] = container
+end
+
+local function CreateCrystalESP(crystal)
+    if Crystal_ESP_Cache[crystal] then return end
+    local isRuneItem = IsRune(crystal)
+    local hl = Instance.new("Highlight")
+    hl.Name = isRuneItem and "DaleyKavo_RuneHighlight" or "DaleyKavo_CrystalHighlight"
+    hl.FillColor = isRuneItem and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(190, 0, 255)
+    hl.FillTransparency = 0.3
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Adornee = crystal
+    hl.Enabled = isRuneItem and (States.CrystalESP or States.RuneESP) or States.CrystalESP
+    hl.Parent = crystal
+    Crystal_ESP_Cache[crystal] = hl
+end
+
+for _, p in ipairs(Players:GetPlayers()) do CreatePlayerESP(p) end
+Players.PlayerAdded:Connect(CreatePlayerESP)
+
+if CrystalsFolder then
+    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do CreateCrystalESP(crystal) end
+    CrystalsFolder.ChildAdded:Connect(CreateCrystalESP)
+end
+
+-- ==========================================
+-- [[ DAEMON & BACKGROUND WORKER THREADS ]] --
+-- ==========================================
+
+-- Proximity Prompt Interactor Daemon
+task.spawn(function()
+    while true do
+        if (States.AutoCrystal or States.AutoRuneFarm or States.AutoBoulderFarm or States.AutoCollectOres) and fireproximityprompt then
+            pcall(function()
+                local myRoot = GetRoot()
+                local target = States.AutoRuneFarm and States.CurrentRune or (States.AutoBoulderFarm and States.CurrentBoulder or States.CurrentCrystal)
+                if target then
+                    local prompt = target:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then fireproximityprompt(prompt) end
+                end
+
+                if States.AutoCollectOres and myRoot then
+                    local searchFolders = {DropsFolder, Workspace:FindFirstChild("Drops"), Workspace:FindFirstChild("Items")}
+                    for _, folder in ipairs(searchFolders) do
+                        if folder then
+                            for _, drop in ipairs(folder:GetChildren()) do
+                                local part = drop:IsA("BasePart") and drop or drop:FindFirstChildWhichIsA("BasePart", true)
+                                if part and (myRoot.Position - part.Position).Magnitude <= States.AutoCollectRadius then
+                                    local prompt = drop:FindFirstChildOfClass("ProximityPrompt") or drop:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                    if prompt then fireproximityprompt(prompt) end
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- Auto Mine & Tracking Daemon (Crystals, Boulders, Runes)
+task.spawn(function()
+    while true do
+        if States.AutoCrystal or States.AutoRuneFarm or States.AutoBoulderFarm then
+            local myRoot = GetRoot()
+            if myRoot then
+                local now = os.clock()
+                local isRune = States.AutoRuneFarm
+                local isBoulder = States.AutoBoulderFarm
+
+                local activeTarget = isRune and States.CurrentRune or (isBoulder and States.CurrentBoulder or States.CurrentCrystal)
+                local targetValid = activeTarget and activeTarget.Parent and activeTarget:IsDescendantOf(Workspace)
+
+                if not targetValid then
+                    if isRune then
+                        States.CurrentRune = GetNearestCrystal(true)
+                    elseif isBoulder then
+                        States.CurrentBoulder = GetNearestBoulder()
+                    else
+                        States.CurrentCrystal = GetNearestCrystal(false)
+                    end
+                end
+
+                local currentTarget = isRune and States.CurrentRune or (isBoulder and States.CurrentBoulder or States.CurrentCrystal)
+                if currentTarget then
+                    pcall(function()
+                        local p = currentTarget:IsA("BasePart") and currentTarget or currentTarget:FindFirstChildWhichIsA("BasePart", true)
+                        if p then
+                            myRoot.Velocity = Vector3.new(0, 0, 0)
+                            myRoot.CFrame = CFrame.new(p.Position + Vector3.new(0, 1.5, 0))
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(0.01)
+    end
+end)
+
+-- Fast Digging Daemon
+task.spawn(function()
+    while true do
+        if (States.AutoDigEnabled or States.FastDigEnabled) and DigRequest then
+            pcall(function()
+                DigRequest:FireServer(States.DiggerToolName, nil)
+                if LP.Character then
+                    local tool = LP.Character:FindFirstChildOfClass("Tool")
+                    if tool then tool:Activate() end
+                end
+            end)
+        end
+        local delayTime = States.FastDigEnabled and math.max(0.01, States.FastDigDelay) or 0.1
+        task.wait(delayTime)
+    end
+end)
+
+-- Auto Sell Remote Daemon
+task.spawn(function()
+    while true do
+        if SellRequest then
+            if States.AutoSellEnabled then pcall(function() SellRequest:FireServer("all") end) end
+            if States.AutoSellWhenFull then
+                local curW, maxC = CheckInventoryStatus()
+                if maxC > 0 and curW >= maxC then
+                    pcall(function() SellRequest:FireServer("all") end)
+                    NotifyUser("Inventory", Text("FullSold"), 3)
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Positional Tracker Frame UI update loop
+task.spawn(function()
+    while true do
+        local root = GetRoot()
+        if root then
+            local pos = root.Position
+            PosLabel.Text = string.format("Current Location: X: %.1f, Y: %.1f, Z: %.1f", pos.X, pos.Y, pos.Z)
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- Core Physics & Locomotion Thread Hook
+RunService.Heartbeat:Connect(function(deltaTime)
+    local root = GetRoot()
+    local hum = GetHumanoid()
+    if not root or not hum then return end
+
+    if States.NoclipEnabled and LP.Character then
+        for _, descendant in ipairs(LP.Character:GetChildren()) do
+            if descendant:IsA("BasePart") then descendant.CanCollide = false end
+        end
+    end
+
+    if States.FloatEnabled and not States.FlyEnabled then
+        root.Velocity = Vector3.new(root.Velocity.X, 0, root.Velocity.Z)
+    end
+
+    if States.FlyEnabled then
+        hum.PlatformStand = true
+        local flyDirection = Vector3.new(0, 0, 0)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
+        if flyDirection.Magnitude > 0 then
+            root.Velocity = flyDirection.Unit * States.FlySpeed
+        else
+            root.Velocity = Vector3.new(0, 0, 0)
+        end
+    else
+        if hum.PlatformStand and not States.FlyEnabled then hum.PlatformStand = false end
+        if States.SpeedEnabled then
+            local moveDirection = Vector3.new(0, 0, 0)
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
+            moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
+            if moveDirection.Magnitude > 0 then
+                root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime)
+            end
+        end
+    end
+end)

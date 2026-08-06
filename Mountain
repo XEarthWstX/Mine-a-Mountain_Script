@@ -26,7 +26,7 @@ local CLASS_PROPERTIES = {
 	BindableEvent = {},
 	BindableFunction = {},
 	Folder = {},
-	
+
 	-- Value Objects
 	StringValue = {"Value"},
 	IntValue = {"Value"},
@@ -36,17 +36,17 @@ local CLASS_PROPERTIES = {
 	Vector3Value = {"Value"},
 	CFrameValue = {"Value"},
 	ObjectValue = {"Value"},
-	
+
 	-- UI
 	ScreenGui = {"Enabled", "ResetOnSpawn", "ZIndexBehavior"},
 	TextLabel = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position"},
 	TextButton = {"Text", "TextColor3", "TextSize", "Font", "BackgroundColor3", "Size", "Position"},
 	Frame = {"BackgroundColor3", "BackgroundTransparency", "Size", "Position"},
-	
+
 	-- Parts
 	Part = {"Shape", "Size", "Position", "Orientation", "Color", "Material", "Transparency", "CanCollide", "Anchored"},
 	MeshPart = {"MeshId", "TextureID", "Size", "Position", "Orientation", "Color", "Material"},
-	
+
 	-- Other
 	Sound = {"SoundId", "Volume", "PlaybackSpeed", "Looped", "Playing"},
 	Animation = {"AnimationId"},
@@ -65,7 +65,7 @@ local function getProperties(instance)
 		Name = instance.Name,
 		ClassName = className
 	}
-	
+
 	-- ดึง properties ที่กำหนดไว้
 	for _, propName in ipairs(props) do
 		local success, value = pcall(function()
@@ -94,7 +94,7 @@ local function getProperties(instance)
 			end
 		end
 	end
-	
+
 	-- ดึง Attributes
 	if ReplicatedStorageDumper.Config.SaveAttributes then
 		local attrs = instance:GetAttributes()
@@ -102,7 +102,7 @@ local function getProperties(instance)
 			data._attributes = attrs
 		end
 	end
-	
+
 	return data
 end
 
@@ -115,9 +115,9 @@ function ReplicatedStorageDumper.dumpInstance(instance, depth)
 	if depth > ReplicatedStorageDumper.Config.MaxDepth then
 		return {Name = instance.Name, ClassName = instance.ClassName, _truncated = true}
 	end
-	
+
 	local data = getProperties(instance)
-	
+
 	-- ดึง Children แบบ recursive
 	local children = instance:GetChildren()
 	if #children > 0 then
@@ -132,11 +132,11 @@ function ReplicatedStorageDumper.dumpInstance(instance, depth)
 					continue
 				end
 			end
-			
+
 			table.insert(data._children, ReplicatedStorageDumper.dumpInstance(child, depth + 1))
 		end
 	end
-	
+
 	return data
 end
 
@@ -149,7 +149,7 @@ function ReplicatedStorageDumper.toJSON(data, pretty)
 	local success, result = pcall(function()
 		return HttpService:JSONEncode(data)
 	end)
-	
+
 	if success then
 		if pretty then
 			-- Format เบื้องต้น
@@ -165,9 +165,9 @@ end
 function ReplicatedStorageDumper.saveToFile(data, filename)
 	filename = filename or ("ReplicatedStorage_Dump_" .. os.time())
 	local json = ReplicatedStorageDumper.toJSON(data, false)
-	
+
 	if not json then return false end
-	
+
 	if RunService:IsStudio() then
 		-- สร้าง Folder ใน ServerStorage
 		local folder = game.ServerStorage:FindFirstChild("StorageDumps")
@@ -176,7 +176,7 @@ function ReplicatedStorageDumper.saveToFile(data, filename)
 			folder.Name = "StorageDumps"
 			folder.Parent = game.ServerStorage
 		end
-		
+
 		-- สร้าง ModuleScript เก็บ JSON
 		local module = Instance.new("ModuleScript")
 		module.Name = filename
@@ -185,7 +185,7 @@ function ReplicatedStorageDumper.saveToFile(data, filename)
 			"-- Size: " .. tostring(#json) .. " chars\n" ..
 			"return [[" .. json .. "]]"
 		module.Parent = folder
-		
+
 		print(string.format("[ReplicatedStorageDumper] ✅ Saved: ServerStorage.StorageDumps.%s (%d chars)", filename, #json))
 		return true
 	else

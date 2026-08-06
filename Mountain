@@ -1,900 +1,709 @@
--- [[ Daley Hub - Kavo Exploration & Utility Suite v3.0 (Enhanced Edition) ]] --
--- Features Added:
--- 1. Weight Filter for Crystal Searching (Enable/Disable + Custom Max Weight)
--- 2. Drop All Ores Except Runes (Manual Button + Auto Drop Toggle)
--- 3. Auto Collect Ores / Drops / Proximity Prompts
--- 4. Teleport to Nearest / Selected Ore
--- 5. Teleport to Target Player (Dropdown Selection)
--- 6. Bring Target Player to Me
--- 7. Rune Scanner (Rune ESP, Teleport to Rune, Auto Farm Rune)
--- 8. Fly & Float Modes (With Speed Controls)
--- 9. Speed Control (CFrame WalkSpeed Scaling)
--- 10. Fast Digging (High-Frequency Remote & Tool Activation with Custom Cooldown)
--- 11. Auto Mine (Teleport to Ore + Auto Dig Daemon)
--- 12. Auto Sell when Inventory is Full (Capacity/Weight Detector + Auto Remote Fire)
--- + All Original Daley Hub v2.3.3 Features Maintained
+--// Boulder & Rune Auto Farm System v3.0 - DELTA EDITION
+--// ออกแบบมาสำหรับ Delta Executor โดยเฉพาะ
+--// วางไว้ใน AutoExecute หรือ Execute ตอนเข้าเกม
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
 
-local LP = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
 
--- ==========================================
--- [[ REMOTE & INSTANCE PATHS ]] --
--- ==========================================
-local RemotesFolder = ReplicatedStorage:WaitForChild("Remotes", 3)
-local DigRequest = RemotesFolder and RemotesFolder:WaitForChild("DigRequest", 2)
-local SellRequest = RemotesFolder and RemotesFolder:WaitForChild("SellRequest", 2)
-local UpgradeBuy = RemotesFolder and RemotesFolder:WaitForChild("UpgradeBuy", 2)
-local DropRequest = RemotesFolder and (RemotesFolder:FindFirstChild("DropRequest") or RemotesFolder:FindFirstChild("DropItem") or RemotesFolder:FindFirstChild("DropOre"))
-
-local ThingsFolder = Workspace:WaitForChild("Things", 3)
-local CrystalsFolder = ThingsFolder and ThingsFolder:WaitForChild("Crystals", 3)
-local DropsFolder = ThingsFolder and (ThingsFolder:FindFirstChild("Drops") or ThingsFolder:FindFirstChild("Ores") or ThingsFolder:FindFirstChild("Items"))
-
--- ==========================================
--- [[ STATE STORAGE ]] --
--- ==========================================
-local States = {
-    -- Locomotion
-    SpeedEnabled       = false,
-    SpeedValue         = 50,
-    FlyEnabled         = false,
-    FlySpeed           = 50,
-    FloatEnabled       = false,
-    FloatHeight        = 5,
-    NoclipEnabled      = false,
-
-    -- Visuals / Scanner
-    PlayerESP          = false,
-    CrystalESP         = false,
-    RuneESP            = false,
-    SelectedPlayer     = nil,
-    SelectedCrystal    = nil,
-    SelectedRune       = nil,
-
-    -- Weight & Inventory Controls (Req 1, 2, 12)
-    WeightFilterEnabled = false,
-    MaxAllowedWeight   = 100,
-    AutoDropExceptRunes = false,
-    AutoSellWhenFull   = true,
-    InventoryMaxCapacity = 100,
-    CurrentInventoryWeight = 0,
-
-    -- Auto Pickup / Collect (Req 3)
-    AutoCollectOres    = false,
-    AutoCollectRadius  = 50,
-
-    -- Digging Automation (Req 10, 11)
-    FastDigEnabled     = false,
-    FastDigDelay       = 0.05,
-    AutoDigEnabled     = false,
-    DiggerToolName     = "Rusty Scrapper",
-    AutoSellEnabled    = false,
-
-    -- Rune Farming & Search (Req 7)
-    AutoRuneFarm       = false,
-    CurrentRune        = nil,
-
-    -- Air Upgrades
-    AutoAir1           = false,
-    AutoAir2           = false,
-    AutoAir3           = false,
-
-    -- Weight Upgrades
-    AutoWeight1        = false,
-    AutoWeight2        = false,
-    AutoWeight3        = false,
-
-    -- Crystal Farming (Req 11)
-    AutoCrystal        = false,
-    CurrentCrystal     = nil,
-    CrystalHoldTime    = 5,        
-    LockTimestamp      = 0,
-    SkipCurrent        = false     
+--// Delta API Detection
+local DeltaAPI = {
+    QueueTeleport = queue_on_teleport or syn and syn.queue_on_teleport,
+    HttpRequest = http_request or request or syn and syn.request,
+    ProtectGui = protectgui or gethui and function(gui) gui.Parent = gethui() end,
+    WriteFile = writefile,
+    ReadFile = readfile,
+    IsFile = isfile,
+    MakeFolder = makefolder,
+    ListFiles = listfiles,
+    GetConnections = getconnections,
+    FireTouch = firetouchinterest,
+    FirePrompt = fireproximityprompt,
+    FireClick = fireclickdetector,
+    HookFunction = hookfunction,
+    GetRawMeta = getrawmetatable,
+    CheckCaller = checkcaller,
+    GetNamecallMethod = getnamecallmethod,
 }
 
-local Player_ESP_Cache = {}
-local Crystal_ESP_Cache = {}
-local Rune_ESP_Cache = {}
-local PermanentBlacklist = {}  
-local CrystalTargetStartTime = 0 
+--// ตั้งค่าหลัก
+local CONFIG = {
+    FarmBoulders = true,
+    FarmRunes = true,
+    TeleportSpeed = 250,         -- ความเร็ว Tween (studs/วิ)
+    BoulderOffset = Vector3.new(0, 4, 5),
+    RuneOffset = Vector3.new(0, 2, 0),
+    DigDelay = 0.15,             -- ความถี่ขุด (ยิ่งน้อยยิ่งเร็ว)
+    RuneCollectDelay = 0.2,
+    SearchRadius = 3000,         -- รัศมีค้นหาใหญ่ขึ้น
+    AutoEquipPickaxe = true,
+    AutoRejoin = true,
+    RejoinDelay = 3,             -- วินาทีรอก่อนรีจอย
+    MinBouldersBeforeRejoin = 0,
+    SelectedTiers = {true, true, true, true, true, true},
+    ToggleKey = Enum.KeyCode.RightShift,
+    AntiAFK = true,
+    DiscordWebhook = "",         -- ใส่ Webhook URL ถ้าต้องการแจ้งเตือน Discord
+    NotifyOnRejoin = true,
+    AutoLoadOnTeleport = true,   -- Auto execute หลังรีจอย (ใช้ queue_on_teleport)
 
--- ==========================================
--- [[ UTILITY FUNCTIONS ]] --
--- ==========================================
-local function GetRoot(player)
-    local p = player or LP
-    local char = p.Character
-    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart"))
-end
+    -- Pickaxe List
+    PickaxeNames = {
+        "Diamond Pickaxe", "Celestial Apex", "Tempest Pick", "Obsidian Edge",
+        "Frostbite Pick", "Emerald Carver", "Copper Pick", "Hardened Iron",
+        "Reinforced Steel", "Rusty Scrapper", "Titanium Spike", "Volcano Basalt",
+        "Weathered Wood", "Chipped Stone", "The Terminus", "Singularity",
+        "Voidreign", "Nebular Throne", "Eclipse Fang", "Astral Rend", "Shark Pickaxe"
+    },
 
-local function GetHumanoid(player)
-    local p = player or LP
-    local char = p.Character
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
+    -- Tier Detection Keywords
+    TierKeywords = {
+        [1] = {"Common", "Basic", "Stone", "Pebbles", "Normal"},
+        [2] = {"Uncommon", "Copper", "Iron", "Granite", "Green"},
+        [3] = {"Rare", "Silver", "Gold", "Crystal", "Quartz", "Blue"},
+        [4] = {"Epic", "Platinum", "Diamond", "Emerald", "Sapphire", "Purple"},
+        [5] = {"Legendary", "Obsidian", "Celestial", "Void", "Astral", "Orange"},
+        [6] = {"Mythic", "Divine", "Ethereal", "Godly", "Ancient", "Rainbow"}
+    },
+    TierColors = {
+        Color3.fromRGB(169, 169, 169),
+        Color3.fromRGB(0, 200, 0),
+        Color3.fromRGB(0, 100, 255),
+        Color3.fromRGB(150, 0, 200),
+        Color3.fromRGB(255, 140, 0),
+        Color3.fromRGB(255, 50, 50),
+    },
+    TierNames = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"}
+}
 
-local function GetOtherPlayers()
-    local names = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then table.insert(names, p.Name) end
+--// สถานะ
+_G.AutoFarmEnabled = false
+local isFarming = false
+local currentJobId = game.JobId
+local placeId = game.PlaceId
+local boulderCount = 0
+local totalMined = 0
+local totalRunes = 0
+local sessionStart = tick()
+
+--// บันทึกข้อมูลสำหรับ Rejoin
+local SAVE_FOLDER = "DeltaBoulderFarm"
+local SAVE_FILE = SAVE_FOLDER .. "/config.json"
+local JOB_FILE = SAVE_FOLDER .. "/jobid.txt"
+
+pcall(function()
+    if DeltaAPI.MakeFolder and not DeltaAPI.IsFile(SAVE_FOLDER) then
+        DeltaAPI.MakeFolder(SAVE_FOLDER)
     end
-    if #names == 0 then table.insert(names, "None") end
-    return names
+end)
+
+local function saveData()
+    pcall(function()
+        if DeltaAPI.WriteFile then
+            local data = {
+                JobId = currentJobId,
+                PlaceId = placeId,
+                SelectedTiers = CONFIG.SelectedTiers,
+                FarmBoulders = CONFIG.FarmBoulders,
+                FarmRunes = CONFIG.FarmRunes,
+                TotalMined = totalMined,
+                TotalRunes = totalRunes,
+                Timestamp = os.time()
+            }
+            DeltaAPI.WriteFile(SAVE_FILE, HttpService:JSONEncode(data))
+            DeltaAPI.WriteFile(JOB_FILE, currentJobId)
+        end
+    end)
 end
 
--- Helper to extract crystal weight
-local function GetCrystalWeight(crystal)
-    if not crystal then return 0 end
-    
-    -- Check Attributes
-    local weightAttr = crystal:GetAttribute("Weight") or crystal:GetAttribute("CrystalWeight") or crystal:GetAttribute("ItemWeight")
-    if weightAttr and type(weightAttr) == "number" then
-        return weightAttr
-    end
-
-    -- Check Value instances
-    local weightObj = crystal:FindFirstChild("Weight") or crystal:FindFirstChild("WeightValue")
-    if weightObj and weightObj:IsA("ValueBase") then
-        return weightObj.Value
-    end
-
-    -- Parse from Name if formatted e.g. "Iron (50kg)" or "Weight: 20"
-    local name = crystal.Name
-    local weightInName = name:match("(%d+%.?%d*)%s*kg") or name:match("Weight:%s*(%d+%.?%d*)") or name:match("(%d+%.?%d*)")
-    if weightInName then
-        return tonumber(weightInName) or 0
-    end
-
-    return 0
+local function loadData()
+    pcall(function()
+        if DeltaAPI.IsFile and DeltaAPI.ReadFile and DeltaAPI.IsFile(SAVE_FILE) then
+            local data = HttpService:JSONDecode(DeltaAPI.ReadFile(SAVE_FILE))
+            if data then
+                CONFIG.SelectedTiers = data.SelectedTiers or CONFIG.SelectedTiers
+                CONFIG.FarmBoulders = data.FarmBoulders ~= nil and data.FarmBoulders or CONFIG.FarmBoulders
+                CONFIG.FarmRunes = data.FarmRunes ~= nil and data.FarmRunes or CONFIG.FarmRunes
+                totalMined = data.TotalMined or 0
+                totalRunes = data.TotalRunes or 0
+            end
+        end
+    end)
 end
 
--- Check if item is a Rune
-local function IsRune(instance)
-    if not instance then return false end
-    local name = string.lower(instance.Name)
-    if name:find("rune") then return true end
-    
-    local typeAttr = instance:GetAttribute("Type") or instance:GetAttribute("ItemType")
-    if typeAttr and string.lower(tostring(typeAttr)):find("rune") then
-        return true
+loadData()
+saveData()
+
+--// Discord Webhook
+local function sendDiscord(msg, color)
+    if CONFIG.DiscordWebhook == "" or not DeltaAPI.HttpRequest then return end
+    pcall(function()
+        DeltaAPI.HttpRequest({
+            Url = CONFIG.DiscordWebhook,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode({
+                embeds = {{
+                    title = "🪨 Boulder Farm Delta",
+                    description = msg,
+                    color = color or 0x00FF00,
+                    footer = {text = "JobId: " .. string.sub(currentJobId, 1, 12) .. "..."},
+                    timestamp = DateTime.now():ToIsoDate()
+                }}
+            })
+        })
+    end)
+end
+
+--// Anti AFK (Delta Optimized - ใช้ getconnections ปิด Idle)
+if CONFIG.AntiAFK and DeltaAPI.GetConnections then
+    pcall(function()
+        for _, conn in pairs(DeltaAPI.GetConnections(player.Idled)) do
+            if conn.Disable then conn:Disable() end
+            if conn.disconnect then conn:disconnect() end
+        end
+    end)
+else
+    -- Fallback
+    player.Idled:Connect(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+        wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+    end)
+end
+
+--// Auto Rejoin Queue (Delta queue_on_teleport)
+if CONFIG.AutoLoadOnTeleport and DeltaAPI.QueueTeleport then
+    pcall(function()
+        local scriptURL = "PASTE_YOUR_SCRIPT_URL_HERE" -- เปลี่ยนเป็น URL ของสคริปต์คุณ
+        DeltaAPI.QueueTeleport([[
+            wait(4)
+            loadstring(game:HttpGet("]] .. scriptURL .. [["))()
+        ]])
+    end)
+end
+
+--// UI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DeltaBoulderFarmV3"
+screenGui.ResetOnSpawn = false
+
+-- Delta ProtectGui
+if DeltaAPI.ProtectGui then
+    DeltaAPI.ProtectGui(screenGui)
+else
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 340, 0, 460)
+mainFrame.Position = UDim2.new(0.8, -170, 0.03, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.BackgroundTransparency = 0.02
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 14)
+
+local stroke = Instance.new("UIStroke", mainFrame)
+stroke.Color = Color3.fromRGB(0, 200, 255)
+stroke.Thickness = 2.5
+
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, 0, 0, 42)
+title.BackgroundColor3 = Color3.fromRGB(0, 80, 160)
+title.Text = "🪨 Delta Boulder & Rune Farm"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 17
+Instance.new("UICorner", title).CornerRadius = UDim.new(0, 12)
+
+--// Toggle Builder
+local function createToggle(name, posY, defaultState, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.88, 0, 0, 30)
+    btn.Position = UDim2.new(0.06, 0, 0, posY)
+    btn.BackgroundColor3 = defaultState and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(180, 50, 50)
+    btn.Text = (defaultState and "✅ " or "❌ ") .. name
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.Parent = mainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+
+    local state = defaultState
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.BackgroundColor3 = state and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(180, 50, 50)
+        btn.Text = (state and "✅ " or "❌ ") .. name
+        callback(state)
+        saveData()
+    end)
+    return btn
+end
+
+createToggle("🪨 Farm Boulders", 52, CONFIG.FarmBoulders, function(v) CONFIG.FarmBoulders = v end)
+createToggle("🔮 Farm Runes", 86, CONFIG.FarmRunes, function(v) CONFIG.FarmRunes = v end)
+createToggle("🔄 Auto Rejoin", 120, CONFIG.AutoRejoin, function(v) CONFIG.AutoRejoin = v end)
+createToggle("🛡️ Anti AFK", 154, CONFIG.AntiAFK, function(v) CONFIG.AntiAFK = v end)
+
+--// Tier Selector
+local tierFrame = Instance.new("Frame", mainFrame)
+tierFrame.Size = UDim2.new(0.88, 0, 0, 145)
+tierFrame.Position = UDim2.new(0.06, 0, 0, 192)
+tierFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+tierFrame.BorderSizePixel = 0
+Instance.new("UICorner", tierFrame).CornerRadius = UDim.new(0, 10)
+
+local tierTitle = Instance.new("TextLabel", tierFrame)
+tierTitle.Size = UDim2.new(1, 0, 0, 24)
+tierTitle.BackgroundTransparency = 1
+tierTitle.Text = "⭐ เลือกระดับ Boulder"
+tierTitle.TextColor3 = Color3.fromRGB(255, 220, 80)
+tierTitle.Font = Enum.Font.GothamBold
+tierTitle.TextSize = 14
+
+for i = 1, 6 do
+    local btn = Instance.new("TextButton", tierFrame)
+    btn.Size = UDim2.new(0.30, 0, 0, 28)
+    btn.Position = UDim2.new(((i-1)%3)*0.33 + 0.02, 0, math.floor((i-1)/3)*0.32 + 0.20, 0)
+    btn.BackgroundColor3 = CONFIG.TierColors[i]
+    btn.Text = CONFIG.TierNames[i]
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.TextStrokeTransparency = 0.4
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    local selected = CONFIG.SelectedTiers[i]
+    local stroke2 = Instance.new("UIStroke", btn)
+    stroke2.Color = Color3.new(1,1,1)
+    stroke2.Thickness = selected and 2.5 or 0
+    btn.BackgroundTransparency = selected and 0 or 0.5
+
+    btn.MouseButton1Click:Connect(function()
+        selected = not selected
+        CONFIG.SelectedTiers[i] = selected
+        btn.BackgroundTransparency = selected and 0 or 0.5
+        stroke2.Thickness = selected and 2.5 or 0
+        saveData()
+    end)
+end
+
+--// Stats Labels
+local statusLabel = Instance.new("TextLabel", mainFrame)
+statusLabel.Size = UDim2.new(0.88, 0, 0, 20)
+statusLabel.Position = UDim2.new(0.06, 0, 0, 345)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "⏹️ สถานะ: ปิดอยู่"
+statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextSize = 13
+
+local countLabel = Instance.new("TextLabel", mainFrame)
+countLabel.Size = UDim2.new(0.88, 0, 0, 18)
+countLabel.Position = UDim2.new(0.06, 0, 0, 367)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "🪨 Boulders: 0 | 🔮 Runes: 0"
+countLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+countLabel.Font = Enum.Font.Gotham
+countLabel.TextSize = 11
+
+local statsLabel = Instance.new("TextLabel", mainFrame)
+statsLabel.Size = UDim2.new(0.88, 0, 0, 18)
+statsLabel.Position = UDim2.new(0.06, 0, 0, 385)
+statsLabel.BackgroundTransparency = 1
+statsLabel.Text = "⛏️ ขุดแล้ว: 0 | ⏱️ 0m 0s"
+statsLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+statsLabel.Font = Enum.Font.Gotham
+countLabel.TextSize = 11
+
+local serverLabel = Instance.new("TextLabel", mainFrame)
+serverLabel.Size = UDim2.new(0.88, 0, 0, 16)
+serverLabel.Position = UDim2.new(0.06, 0, 0, 403)
+serverLabel.BackgroundTransparency = 1
+serverLabel.Text = "🌐 " .. string.sub(currentJobId, 1, 10) .. "..."
+serverLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
+serverLabel.Font = Enum.Font.Gotham
+serverLabel.TextSize = 10
+
+local infoLabel = Instance.new("TextLabel", mainFrame)
+infoLabel.Size = UDim2.new(0.88, 0, 0, 18)
+infoLabel.Position = UDim2.new(0.06, 0, 0, 435)
+infoLabel.BackgroundTransparency = 1
+infoLabel.Text = "⌨️ กด RightShift เพื่อ เปิด/ปิด"
+infoLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+infoLabel.Font = Enum.Font.Gotham
+infoLabel.TextSize = 11
+
+--// ฟังก์ชันหา Boulder Tier
+local function getBoulderTier(boulder)
+    local name = boulder.Name:lower()
+
+    -- ตรวจจาก Attribute
+    local attrTier = boulder:GetAttribute("Tier") or boulder:GetAttribute("Rarity") or boulder:GetAttribute("Level")
+    if attrTier then
+        return math.clamp(tonumber(attrTier) or 1, 1, 6)
     end
-    return false
+
+    -- ตรวจจากชื่อ
+    for tier, keywords in ipairs(CONFIG.TierKeywords) do
+        for _, kw in ipairs(keywords) do
+            if name:find(kw:lower()) then
+                return tier
+            end
+        end
+    end
+
+    -- ตรวจจากสี (ถ้ามี)
+    if boulder:IsA("BasePart") then
+        local color = boulder.Color
+        -- สามารถเพิ่ม logic ตรวจสีได้ที่นี่
+    end
+
+    return 1
 end
 
--- Check if crystal satisfies weight filter (Req 1)
-local function SatisfiesWeightFilter(crystal)
-    if not States.WeightFilterEnabled then return true end
-    local weight = GetCrystalWeight(crystal)
-    return weight <= States.MaxAllowedWeight
+--// ฟังก์ชันหา Targets
+local function getDistance(part)
+    return (hrp.Position - part.Position).Magnitude
 end
 
--- Get Nearest Crystal with Weight Filter
-local function GetNearestCrystal(filterRuneOnly)
-    if not CrystalsFolder then return nil end
-    local myRoot = GetRoot()
-    if not myRoot then return nil end
-
-    local closest = nil
-    local shortestDistance = math.huge
-
-    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
-        if crystal and crystal.Parent and not PermanentBlacklist[crystal] then
-            local isRuneMatch = filterRuneOnly and IsRune(crystal) or not filterRuneOnly
-            local isWeightOk = SatisfiesWeightFilter(crystal)
-
-            if isRuneMatch and isWeightOk then
-                local targetPart = crystal:IsA("BasePart") and crystal or crystal:FindFirstChildWhichIsA("BasePart", true)
-                if targetPart then
-                    local dist = (myRoot.Position - targetPart.Position).Magnitude
-                    if dist < shortestDistance then
-                        shortestDistance = dist
-                        closest = crystal
-                    end
+local function findBoulders()
+    local found = {}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Parent then
+            local isBoulder = false
+            for _, keyword in ipairs({"Boulder", "Rock", "Stone", "Ore", "Mineral", "Deposit"}) do
+                if obj.Name:match(keyword) then
+                    isBoulder = true
+                    break
                 end
             end
-        end
-    end
-    return closest
-end
-
--- List all crystal names in workspace for dropdowns
-local function GetCrystalNames()
-    local names = {}
-    if CrystalsFolder then
-        for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
-            if crystal and crystal.Name then
-                table.insert(names, crystal.Name)
-            end
-        end
-    end
-    if #names == 0 then table.insert(names, "None") end
-    return names
-end
-
--- Inventory Weight & Capacity Checker (Req 12)
-local function CheckInventoryStatus()
-    local currentWeight = 0
-    local maxWeight = States.InventoryMaxCapacity
-
-    -- Check LP Attributes
-    local weightAttr = LP:GetAttribute("Weight") or LP:GetAttribute("CurrentWeight") or LP:GetAttribute("InventoryWeight")
-    local maxAttr = LP:GetAttribute("MaxWeight") or LP:GetAttribute("MaxCapacity") or LP:GetAttribute("Capacity")
-
-    if weightAttr then currentWeight = tonumber(weightAttr) or currentWeight end
-    if maxAttr then maxWeight = tonumber(maxAttr) or maxWeight end
-
-    -- Check leaderstats
-    local ls = LP:FindFirstChild("leaderstats")
-    if ls then
-        local wVal = ls:FindFirstChild("Weight") or ls:FindFirstChild("Inventory")
-        local mVal = ls:FindFirstChild("MaxWeight") or ls:FindFirstChild("Capacity")
-        if wVal then currentWeight = wVal.Value end
-        if mVal then maxWeight = mVal.Value end
-    end
-
-    -- Fallback: Count items in Backpack
-    if currentWeight == 0 and LP:FindFirstChild("Backpack") then
-        local items = LP.Backpack:GetChildren()
-        currentWeight = #items
-    end
-
-    States.CurrentInventoryWeight = currentWeight
-    States.InventoryMaxCapacity = maxWeight
-
-    return currentWeight, maxWeight
-end
-
--- Drop All Ores Except Runes (Req 2)
-local function DropAllOresExceptRunes()
-    local backpack = LP:FindFirstChild("Backpack")
-    local char = LP.Character
-
-    local function processItem(item)
-        if item:IsA("Tool") and not IsRune(item) then
-            if DropRequest then
-                pcall(function() DropRequest:FireServer(item) end)
-            else
-                -- Physical drop / Unequip & parent to Workspace
+            if isBoulder then
+                local isBarrier = false
                 pcall(function()
-                    item.Parent = Workspace
-                    if GetRoot() then
-                        local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart")
-                        if handle then handle.CFrame = GetRoot().CFrame * CFrame.new(0, 0, -3) end
+                    if obj:IsDescendantOf(Workspace:FindFirstChild("Barriers")) then
+                        isBarrier = true
                     end
                 end)
+                if not isBarrier and getDistance(obj) <= CONFIG.SearchRadius then
+                    local tier = getBoulderTier(obj)
+                    if CONFIG.SelectedTiers[tier] then
+                        table.insert(found, {Part = obj, Tier = tier, Distance = getDistance(obj)})
+                    end
+                end
             end
         end
     end
-
-    if backpack then
-        for _, item in ipairs(backpack:GetChildren()) do processItem(item) end
-    end
-    if char then
-        for _, item in ipairs(char:GetChildren()) do processItem(item) end
-    end
+    table.sort(found, function(a, b) return a.Distance < b.Distance end)
+    return found
 end
 
--- ==========================================
--- [[ ESP SYSTEMS ]] --
--- ==========================================
-
--- Player Chams
-local function CreatePlayerESP(player)
-    if player == LP or Player_ESP_Cache[player] then return end
-    local container = {}
-
-    local function applyESP(char)
-        if not char then return end
-        if container.Highlight then pcall(function() container.Highlight:Destroy() end) end
-
-        local hl = Instance.new("Highlight")
-        hl.Name = "DaleyKavo_PlayerHighlight"
-        hl.FillColor = Color3.fromRGB(0, 255, 150)
-        hl.FillTransparency = 0.5
-        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-        hl.Adornee = char
-        hl.Enabled = States.PlayerESP
-        hl.Parent = char
-        container.Highlight = hl
+local function findRunes()
+    local found = {}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if (obj:IsA("BasePart") or obj:IsA("MeshPart")) and obj.Name:match("Rune$") then
+            if obj.Parent and obj.Parent:IsDescendantOf(Workspace) then
+                if getDistance(obj) <= CONFIG.SearchRadius then
+                    table.insert(found, obj)
+                end
+            end
+        end
     end
-
-    if player.Character then applyESP(player.Character) end
-    player.CharacterAdded:Connect(applyESP)
-    Player_ESP_Cache[player] = container
+    table.sort(found, function(a, b) return getDistance(a) < getDistance(b) end)
+    return found
 end
 
-local function RemovePlayerESP(player)
-    if Player_ESP_Cache[player] then
+--// Tween & Actions
+local function tweenToPart(part, offset)
+    if not part or not part.Parent then return false end
+    local targetPos = part.Position + offset
+    local distance = (hrp.Position - targetPos).Magnitude
+    if distance < 4 then return true end
+
+    local tweenInfo = TweenInfo.new(
+        math.clamp(distance / CONFIG.TeleportSpeed, 0.08, 3),
+        Enum.EasingStyle.Linear
+    )
+    local targetCFrame = CFrame.lookAt(targetPos, part.Position)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    return true
+end
+
+local function equipPickaxe()
+    local backpack = player:WaitForChild("Backpack")
+    for _, toolName in ipairs(CONFIG.PickaxeNames) do
+        local tool = backpack:FindFirstChild(toolName)
+        if tool and tool:IsA("Tool") then
+            humanoid:EquipTool(tool)
+            wait(0.15)
+            return character:FindFirstChild(toolName)
+        end
+    end
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.Name:lower():match("pick") or tool.Name:lower():match("axe")) then
+            humanoid:EquipTool(tool)
+            wait(0.15)
+            return character:FindFirstChild(tool.Name)
+        end
+    end
+    return nil
+end
+
+local function collectRune(runePart)
+    if not runePart or not runePart.Parent then return end
+
+    -- Delta firetouchinterest
+    if DeltaAPI.FireTouch then
         pcall(function()
-            if Player_ESP_Cache[player].Highlight then Player_ESP_Cache[player].Highlight:Destroy() end
+            DeltaAPI.FireTouch(hrp, runePart, 0)
+            wait(0.03)
+            DeltaAPI.FireTouch(hrp, runePart, 1)
         end)
-        Player_ESP_Cache[player] = nil
+    end
+
+    -- Teleport into rune
+    hrp.CFrame = CFrame.new(runePart.Position + Vector3.new(0, 1.5, 0))
+    wait(0.08)
+
+    -- Delta fireproximityprompt
+    if DeltaAPI.FirePrompt then
+        for _, prompt in ipairs(runePart:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") then
+                pcall(function() DeltaAPI.FirePrompt(prompt) end)
+                break
+            end
+        end
     end
 end
 
--- Crystal & Rune Chams (Req 7)
-local function CreateCrystalESP(crystal)
-    if Crystal_ESP_Cache[crystal] then return end
-    
-    local isRuneItem = IsRune(crystal)
-    local hl = Instance.new("Highlight")
-    hl.Name = isRuneItem and "DaleyKavo_RuneHighlight" or "DaleyKavo_CrystalHighlight"
-    hl.FillColor = isRuneItem and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(190, 0, 255)
-    hl.FillTransparency = 0.3
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.Adornee = crystal
-    hl.Enabled = isRuneItem and (States.CrystalESP or States.RuneESP) or States.CrystalESP
-    hl.Parent = crystal
-    
-    Crystal_ESP_Cache[crystal] = hl
-end
-
-local function RemoveCrystalESP(crystal)
-    if Crystal_ESP_Cache[crystal] then
-        pcall(function()
-            Crystal_ESP_Cache[crystal]:Destroy()
-        end)
-        Crystal_ESP_Cache[crystal] = nil
-    end
-end
-
--- Initialize ESP Loops
-for _, p in ipairs(Players:GetPlayers()) do CreatePlayerESP(p) end
-Players.PlayerAdded:Connect(CreatePlayerESP)
-Players.PlayerRemoving:Connect(RemovePlayerESP)
-
-if CrystalsFolder then
-    for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
-        CreateCrystalESP(crystal)
-    end
-    CrystalsFolder.ChildAdded:Connect(CreateCrystalESP)
-    CrystalsFolder.ChildRemoved:Connect(RemoveCrystalESP)
-end
-
--- ==========================================
--- [[ KAVO LIBRARY CONFIGURATION ]] --
--- ==========================================
-local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Kavo.CreateLib("Daley Hub - Utility Engine v3.0", "Midnight")
-
-local MoveTab   = Window:NewTab("Locomotion & Fly")
-local AutoTab   = Window:NewTab("Mining & Fast Dig")
-local WeightTab = Window:NewTab("Inventory & Weight")
-local RuneTab   = Window:NewTab("Rune Finder")
-local ScanTab   = Window:NewTab("Players & Teleport")
-local CoordTab  = Window:NewTab("Coordinates Manager")
-
--- ==========================================
--- [[ 1. MOVEMENT OPERATIONS (Req 8, 9) ]] --
--- ==========================================
-local MoveSec = MoveTab:NewSection("Movement & Speed Controls")
-
-MoveSec:NewToggle("CFrame Speed Mode", "Speeds up horizontal translation vectors", function(v)
-    States.SpeedEnabled = v
-end)
-
-MoveSec:NewSlider("Walk Speed Scale", "Adjust speed magnitude", 250, 16, function(v)
-    States.SpeedValue = v
-end)
-
-local FlySec = MoveTab:NewSection("Flight & Float Systems (Req 8)")
-
-FlySec:NewToggle("Fly Mode", "Allows free floating across workspace axises", function(v)
-    States.FlyEnabled = v
-    local hum = GetHumanoid()
-    if not v and hum then hum.PlatformStand = false end
-end)
-
-FlySec:NewSlider("Fly Speed Scale", "Adjust fly movement vector magnitude", 250, 10, function(v)
-    States.FlySpeed = v
-end)
-
-FlySec:NewToggle("Float Mode", "Suspends player floating in place", function(v)
-    States.FloatEnabled = v
-end)
-
-FlySec:NewSlider("Float Height Offset", "Adjust float height above ground", 20, 0, function(v)
-    States.FloatHeight = v
-end)
-
-MoveSec:NewToggle("Noclip Mesh Overrides", "Wipes collisions for character limbs", function(v)
-    States.NoclipEnabled = v
-end)
-
--- ==========================================
--- [[ 2. AUTOMATION & DIGGING (Req 10, 11) ]] --
--- ==========================================
-local AutoSec = AutoTab:NewSection("Mining & Tool Automation")
-
-AutoSec:NewTextBox("Equipped Digger Tool Name", "Type your tool name (e.g. Rusty Scrapper)", function(text)
-    States.DiggerToolName = text
-end)
-
-AutoSec:NewToggle("Auto Dig Toggle", "Passively fires digging remotes in background", function(v)
-    States.AutoDigEnabled = v
-end)
-
-AutoSec:NewToggle("Fast Dig Mode (Req 10)", "Spam fires digging remote & tool activation rapidly", function(v)
-    States.FastDigEnabled = v
-end)
-
-AutoSec:NewSlider("Fast Dig Delay (s)", "Adjust fast dig cooldown speed", 1, 0, function(v)
-    States.FastDigDelay = v / 100 -- Converts to 0.00s - 0.10s scale
-end)
-
-AutoSec:NewToggle("Auto Sell All Toggle", "Passively dumps full inventory to shop remote", function(v)
-    States.AutoSellEnabled = v
-end)
-
--- Crystal Farming Section (Req 4, 11)
-local CrystalSec = AutoTab:NewSection("Crystal Mining Suite (Req 4, 11)")
-
-CrystalSec:NewToggle("Auto Mine Crystals (TP + Dig)", "Teleports to nearest crystal and automatically mines it", function(v)
-    States.AutoCrystal = v
-    if not v then States.CurrentCrystal = nil end
-end)
-
-CrystalSec:NewButton("Teleport to Nearest Crystal", "Instantly warp to closest valid crystal", function()
-    local target = GetNearestCrystal(false)
-    local myRoot = GetRoot()
-    if target and myRoot then
-        local targetPart = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            Kavo:Notify("Teleported", "Warped to " .. target.Name, 2)
-        end
-    else
-        Kavo:Notify("Error", "No valid crystal found!", 2)
-    end
-end)
-
-CrystalSec:NewSlider("Crystal Hold Timer (s)", "Adjust how many seconds to stay at each crystal (0 = stay until broken)", 15, 0, function(v)
-    States.CrystalHoldTime = v
-end)
-
-CrystalSec:NewButton("Next Crystal", "Skips the current targeted crystal instantly", function()
-    if States.CurrentCrystal then States.SkipCurrent = true end
-end)
-
-CrystalSec:NewButton("Blacklist Crystal", "Permanently blocks this targeted crystal for the session", function()
-    if States.CurrentCrystal then
-        local targetToBlacklist = States.CurrentCrystal
-        PermanentBlacklist[targetToBlacklist] = true
-        States.CurrentCrystal = nil 
-        Kavo:Notify("Blacklisted", "This crystal will no longer be targeted.", 3)
-    else
-        Kavo:Notify("Error", "No active crystal target to blacklist!", 3)
-    end
-end)
-
--- Upgrades Interface
-local UpgradeSec = AutoTab:NewSection("Stat Upgrades")
-
-UpgradeSec:NewToggle("Auto Buy Air Tier 1", "Repeatedly purchases Air Level 1", function(v) States.AutoAir1 = v end)
-UpgradeSec:NewToggle("Auto Buy Air Tier 2", "Repeatedly purchases Air Level 2", function(v) States.AutoAir2 = v end)
-UpgradeSec:NewToggle("Auto Buy Air Tier 3", "Repeatedly purchases Air Level 3", function(v) States.AutoAir3 = v end)
-UpgradeSec:NewToggle("Auto Buy Weight Tier 1", "Repeatedly purchases Weight Level 1", function(v) States.AutoWeight1 = v end)
-UpgradeSec:NewToggle("Auto Buy Weight Tier 2", "Repeatedly purchases Weight Level 2", function(v) States.AutoWeight2 = v end)
-UpgradeSec:NewToggle("Auto Buy Weight Tier 3", "Repeatedly purchases Weight Level 3", function(v) States.AutoWeight3 = v end)
-
--- ==========================================
--- [[ 3. INVENTORY & WEIGHT SYSTEM (Req 1, 2, 3, 12) ]] --
--- ==========================================
-local WeightSec = WeightTab:NewSection("Weight Filter & Inventory (Req 1, 12)")
-
-WeightSec:NewToggle("Enable Weight Filtering (Req 1)", "Only farm/target crystals lighter than set weight limit", function(v)
-    States.WeightFilterEnabled = v
-end)
-
-WeightSec:NewSlider("Max Allowed Crystal Weight", "Filter out crystals above this weight limit", 500, 10, function(v)
-    States.MaxAllowedWeight = v
-end)
-
-WeightSec:NewToggle("Auto Sell When Full (Req 12)", "Automatically fires sell remote when inventory reaches capacity", function(v)
-    States.AutoSellWhenFull = v
-end)
-
-local DropSec = WeightTab:NewSection("Inventory Management (Req 2, 3)")
-
-DropSec:NewButton("Drop All Ores (Keep Runes)", "Instantly discards all ores in inventory except Runes", function()
-    DropAllOresExceptRunes()
-    Kavo:Notify("Inventory Cleaned", "Dropped all non-rune ores!", 3)
-end)
-
-DropSec:NewToggle("Auto Drop Non-Rune Ores", "Passively drops any non-rune ore picked up", function(v)
-    States.AutoDropExceptRunes = v
-end)
-
-DropSec:NewToggle("Auto Collect Nearby Ores/Drops (Req 3)", "Automatically fires prompts to pick up ores/items on ground", function(v)
-    States.AutoCollectOres = v
-end)
-
--- ==========================================
--- [[ 4. RUNE FINDER & SCANNER (Req 7) ]] --
--- ==========================================
-local RuneSec = RuneTab:NewSection("Rune Detection & Farm (Req 7)")
-
-RuneSec:NewToggle("Enable Rune ESP", "Highlights all Runes in workspace with a special golden color", function(v)
-    States.RuneESP = v
-    for crystal, hl in pairs(Crystal_ESP_Cache) do
-        if hl and IsRune(crystal) then
-            hl.Enabled = v or States.CrystalESP
+local function digBoulder(boulder)
+    if CONFIG.AutoEquipPickaxe then
+        if not equipPickaxe() then
+            warn("[DeltaFarm] ไม่พบ Pickaxe ใน Backpack!")
+            return
         end
     end
-end)
 
-RuneSec:NewButton("Teleport to Nearest Rune", "Instantly snaps CFrame to closest Rune in workspace", function()
-    local targetRune = GetNearestCrystal(true)
-    local myRoot = GetRoot()
-    if targetRune and myRoot then
-        local targetPart = targetRune:IsA("BasePart") and targetRune or targetRune:FindFirstChildWhichIsA("BasePart", true)
-        if targetPart then
-            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 2, 0))
-            Kavo:Notify("Rune Found", "Teleported to " .. targetRune.Name, 3)
-        end
-    else
-        Kavo:Notify("Notice", "No Runes found currently in workspace!", 3)
-    end
-end)
+    local tool = character:FindFirstChildOfClass("Tool")
+    if not tool then return end
 
-RuneSec:NewToggle("Auto Farm Runes Only", "Priority farming loop that targets Runes specifically", function(v)
-    States.AutoRuneFarm = v
-end)
+    local attempts = 0
+    while boulder and boulder.Parent and attempts < 80 do
+        if not _G.AutoFarmEnabled then break end
 
--- ==========================================
--- [[ 5. VISUALS & PLAYER TELEPORT (Req 5, 6) ]] --
--- ==========================================
-local ScanSec = ScanTab:NewSection("Render Profiles & ESP")
+        hrp.CFrame = CFrame.lookAt(hrp.Position, boulder.Position)
+        tool:Activate()
 
-ScanSec:NewToggle("Enable Server Chams ESP", "Toggles highlighting on all remote clients", function(v)
-    States.PlayerESP = v
-    for _, container in pairs(Player_ESP_Cache) do
-        if container.Highlight then container.Highlight.Enabled = v end
-    end
-end)
+        -- Delta optimized clicking
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        RunService.Heartbeat:Wait()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
 
-ScanSec:NewToggle("Enable Crystal ESP", "Toggles full colored chams across all crystal assets", function(v)
-    States.CrystalESP = v
-    for crystal, highlight in pairs(Crystal_ESP_Cache) do
-        if highlight then highlight.Enabled = v end
-    end
-end)
+        wait(CONFIG.DigDelay)
+        attempts = attempts + 1
 
-local PlrTpSec = ScanTab:NewSection("Player Teleport & Bring (Req 5, 6)")
-
-local PlayerDropdown = PlrTpSec:NewDropdown("Select Target Player (Req 5)", "Choose a player to execute actions on", GetOtherPlayers(), function(selected)
-    States.SelectedPlayer = selected
-end)
-
-PlrTpSec:NewButton("Refresh Player Directory", "Rescans players in server instance", function()
-    PlayerDropdown:Refresh(GetOtherPlayers())
-end)
-
-PlrTpSec:NewButton("Teleport to Player (Req 5)", "Instantly snaps your position to target player", function()
-    if States.SelectedPlayer and States.SelectedPlayer ~= "None" then
-        local targetPlr = Players:FindFirstChild(States.SelectedPlayer)
-        local myRoot = GetRoot()
-        local tRoot = GetRoot(targetPlr)
-        if myRoot and tRoot then
-            myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
-            Kavo:Notify("Success", "Warped to " .. States.SelectedPlayer, 2)
-        end
-    else
-        Kavo:Notify("Error", "No player selected!", 2)
-    end
-end)
-
-PlrTpSec:NewButton("Bring Target Player to Me (Req 6)", "Teleports selected player to your location", function()
-    if States.SelectedPlayer and States.SelectedPlayer ~= "None" then
-        local targetPlr = Players:FindFirstChild(States.SelectedPlayer)
-        local myRoot = GetRoot()
-        local tRoot = GetRoot(targetPlr)
-        if myRoot and tRoot then
-            -- Attempt local bring / tool sync bring
-            pcall(function()
-                tRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
-            end)
-            Kavo:Notify("Bring Executed", "Attempted to bring " .. States.SelectedPlayer, 3)
-        end
-    else
-        Kavo:Notify("Error", "No player selected!", 2)
-    end
-end)
-
--- ==========================================
--- [[ 6. COORDINATE MANAGEMENT OPERATIONS ]] --
--- ==========================================
-local CoordSec = CoordTab:NewSection("Waypoints & Vectors")
-
-local CurrentPosLabel = CoordSec:NewLabel("Current Location: X:0, Y:0, Z:0")
-
-CoordSec:NewButton("Teleport to Spawn", "Instantly warp back to spawn zone", function()
-    local root = GetRoot()
-    if root then root.CFrame = CFrame.new(Vector3.new(-13.78, 29.22, 1075.75)) end
-end)
-
-CoordSec:NewButton("Copy Current Coordinates", "Saves your position straight to clipboard", function()
-    local root = GetRoot()
-    if root then
-        local pos = root.Position
-        local cleanCoords = string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z)
-        
-        if setclipboard then
-            setclipboard(cleanCoords)
-            Kavo:Notify("Success", "Coordinates copied to clipboard: " .. cleanCoords, 3)
+        if boulder and boulder.Parent and boulder:IsDescendantOf(Workspace) then
+            if (hrp.Position - boulder.Position).Magnitude > 8 then
+                tweenToPart(boulder, CONFIG.BoulderOffset)
+            end
         else
-            Kavo:Notify("Executor Error", "Your executor does not support setclipboard!", 3)
+            totalMined = totalMined + 1
+            saveData()
+            break
+        end
+    end
+end
+
+--// Auto Rejoin
+local function rejoinServer()
+    if not CONFIG.AutoRejoin then return end
+
+    statusLabel.Text = "🔄 กำลังรีจอยเซิร์ฟเวอร์..."
+    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+
+    saveData()
+
+    if CONFIG.NotifyOnRejoin then
+        local elapsed = tick() - sessionStart
+        local mins = math.floor(elapsed / 60)
+        local secs = math.floor(elapsed % 60)
+        sendDiscord(
+            "🔄 **รีจอยเซิร์ฟเวอร์**\n" ..
+            "⛏️ ขุดไปแล้ว: " .. totalMined .. " boulders\n" ..
+            "🔮 เก็บไปแล้ว: " .. totalRunes .. " runes\n" ..
+            "⏱️ เวลา: " .. mins .. "m " .. secs .. "s\n" ..
+            "🌐 JobId: `" .. currentJobId .. "`",
+            0xFFA500
+        )
+    end
+
+    wait(CONFIG.RejoinDelay)
+
+    -- Method 1: Teleport to same instance
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(placeId, currentJobId, player)
+    end)
+
+    wait(2)
+
+    -- Method 2: Fallback to normal teleport
+    pcall(function()
+        TeleportService:Teleport(placeId, player)
+    end)
+end
+
+--// Update Stats Loop
+spawn(function()
+    while true do
+        wait(1)
+        if _G.AutoFarmEnabled then
+            local elapsed = tick() - sessionStart
+            local mins = math.floor(elapsed / 60)
+            local secs = math.floor(elapsed % 60)
+            statsLabel.Text = "⛏️ ขุดแล้ว: " .. totalMined .. " | ⏱️ " .. mins .. "m " .. secs .. "s"
         end
     end
 end)
 
--- ==========================================
--- [[ DAEMON & BACKGROUND WORKER THREADS ]] --
--- ==========================================
-
--- Proximity Prompt Auto-Interactor Daemon (Req 3, 11)
-task.spawn(function()
-    while true do
-        if (States.AutoCrystal or States.AutoRuneFarm or States.AutoCollectOres) and fireproximityprompt then
-            pcall(function()
-                local myRoot = GetRoot()
-                
-                -- Auto Crystal / Rune prompt interaction
-                local target = States.AutoRuneFarm and States.CurrentRune or States.CurrentCrystal
-                if target then
-                    local prompt = target:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt then fireproximityprompt(prompt) end
-                end
-
-                -- Auto Collect Drops around player (Req 3)
-                if States.AutoCollectOres and myRoot then
-                    local searchFolders = {DropsFolder, Workspace:FindFirstChild("Drops"), Workspace:FindFirstChild("Items")}
-                    for _, folder in ipairs(searchFolders) do
-                        if folder then
-                            for _, drop in ipairs(folder:GetChildren()) do
-                                local part = drop:IsA("BasePart") and drop or drop:FindFirstChildWhichIsA("BasePart", true)
-                                if part and (myRoot.Position - part.Position).Magnitude <= States.AutoCollectRadius then
-                                    local prompt = drop:FindFirstChildOfClass("ProximityPrompt") or drop:FindFirstChildWhichIsA("ProximityPrompt", true)
-                                    if prompt then fireproximityprompt(prompt) end
-                                end
-                            end
-                        end
-                    end
-                end
-            end)
+--// Main Farm Loop
+local function farmLoop()
+    while _G.AutoFarmEnabled do
+        if not character or not hrp or not humanoid or humanoid.Health <= 0 then
+            character = player.Character or player.CharacterAdded:Wait()
+            hrp = character:WaitForChild("HumanoidRootPart")
+            humanoid = character:WaitForChild("Humanoid")
+            wait(2)
         end
-        task.wait(0.1) 
-    end
-end)
 
--- BULLETPROOF TRACKING CORE: Crystal & Rune Farming Engine (Req 1, 7, 11)
-task.spawn(function()
-    while true do
-        if States.AutoCrystal or States.AutoRuneFarm then
-            local myRoot = GetRoot()
-            if myRoot then
-                local now = os.clock()
-                local isRuneMode = States.AutoRuneFarm
-                
-                -- Verify if target still exists in workspace
-                local activeTarget = isRuneMode and States.CurrentRune or States.CurrentCrystal
-                local targetValid = activeTarget and activeTarget.Parent and activeTarget:IsDescendantOf(Workspace)
-                
-                -- Evaluate active button trigger bypass
-                local forcedSkip = States.SkipCurrent
-                if forcedSkip then States.SkipCurrent = false end
+        local didSomething = false
 
-                -- Condition: If hold timer is set to 0, completely bypass timeIsUp triggers
-                local timeIsUp = false
-                if States.CrystalHoldTime > 0 then
-                    timeIsUp = (now - States.LockTimestamp) >= States.CrystalHoldTime
-                end
-                
-                -- Anti-Stuck Timeout: Only evaluate if an active timer limit exists
-                if targetValid and States.CrystalHoldTime > 0 and (now - CrystalTargetStartTime > States.CrystalHoldTime + 10) then
-                    PermanentBlacklist[activeTarget] = true
-                    if isRuneMode then States.CurrentRune = nil else States.CurrentCrystal = nil end
-                    targetValid = false
-                end
+        -- นับ Boulder
+        local allBoulders = findBoulders()
+        boulderCount = #allBoulders
+        countLabel.Text = "🪨 Boulders: " .. boulderCount .. " | 🔮 Runes: " .. totalRunes
 
-                -- State Progression & Bypassing Engine
-                if not targetValid and not forcedSkip then
-                    if isRuneMode then States.CurrentRune = nil else States.CurrentCrystal = nil end
-                    local newTarget = GetNearestCrystal(isRuneMode)
-                    if newTarget then
-                        if isRuneMode then States.CurrentRune = newTarget else States.CurrentCrystal = newTarget end
-                        CrystalTargetStartTime = now
-                        States.LockTimestamp = now
+        -- Check rejoin
+        if CONFIG.AutoRejoin and boulderCount <= CONFIG.MinBouldersBeforeRejoin then
+            statusLabel.Text = "⚠️ Boulder หมด! รีจอยใน " .. CONFIG.RejoinDelay .. " วิ..."
+            statusLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
+            wait(1)
+            rejoinServer()
+            return
+        end
+
+        -- Farm Runes
+        if CONFIG.FarmRunes then
+            statusLabel.Text = "🔮 กำลังหา Rune..."
+            statusLabel.TextColor3 = Color3.fromRGB(80, 170, 255)
+            local runes = findRunes()
+            for _, rune in ipairs(runes) do
+                if not _G.AutoFarmEnabled then break end
+                if rune and rune.Parent and rune:IsDescendantOf(Workspace) then
+                    statusLabel.Text = "🔮 เก็บ " .. rune.Name
+                    if tweenToPart(rune, CONFIG.RuneOffset) then
+                        collectRune(rune)
+                        totalRunes = totalRunes + 1
+                        didSomething = true
+                        wait(CONFIG.RuneCollectDelay)
                     end
-                elseif timeIsUp or forcedSkip then
-                    -- Rotation strategy handler
-                    local oldTarget = isRuneMode and States.CurrentRune or States.CurrentCrystal
-                    if isRuneMode then States.CurrentRune = nil else States.CurrentCrystal = nil end
-                    
-                    local closest = nil
-                    local shortestDistance = math.huge
-                    
-                    if CrystalsFolder then
-                        for _, crystal in ipairs(CrystalsFolder:GetChildren()) do
-                            local isRuneMatch = isRuneMode and IsRune(crystal) or not isRuneMode
-                            local isWeightOk = SatisfiesWeightFilter(crystal)
-
-                            if crystal and crystal.Parent and crystal ~= oldTarget and not PermanentBlacklist[crystal] and isRuneMatch and isWeightOk then
-                                local targetPart = crystal:IsA("BasePart") and crystal or crystal:FindFirstChildWhichIsA("BasePart", true)
-                                if targetPart then
-                                    local dist = (myRoot.Position - targetPart.Position).Magnitude
-                                    if dist < shortestDistance then
-                                        shortestDistance = dist
-                                        closest = crystal
-                                   end
-                                end
-                            end
-                        end
-                    end
-                    
-                    -- Process evaluation fallback patterns
-                    if closest then
-                        if isRuneMode then States.CurrentRune = closest else States.CurrentCrystal = closest end
-                        CrystalTargetStartTime = now
-                        States.LockTimestamp = now
-                    else
-                        if isRuneMode then States.CurrentRune = oldTarget else States.CurrentCrystal = oldTarget end
-                        States.LockTimestamp = now 
-                    end
-                end
-
-                -- Action Phase: Physical CFrame Anchor Lock
-                local currentTarget = isRuneMode and States.CurrentRune or States.CurrentCrystal
-                if currentTarget then
-                    pcall(function()
-                        local targetPart = currentTarget:IsA("BasePart") and currentTarget or currentTarget:FindFirstChildWhichIsA("BasePart", true)
-                        if targetPart then
-                            myRoot.Velocity = Vector3.new(0, 0, 0)
-                            myRoot.RotVelocity = Vector3.new(0, 0, 0)
-                            myRoot.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 1.5, 0))
-                        end
-                    end)
                 end
             end
         end
-        task.wait(0.01)
-    end
-end)
 
--- Fast Digging Daemon (Req 10)
-task.spawn(function()
-    while true do
-        if (States.AutoDigEnabled or States.FastDigEnabled) and DigRequest then
-            pcall(function()
-                DigRequest:FireServer(States.DiggerToolName, nil)
-                
-                -- If tool is equipped in Character, activate it directly
-                if LP.Character then
-                    local tool = LP.Character:FindFirstChildOfClass("Tool")
-                    if tool then tool:Activate() end
-                end
-            end)
-        end
-        
-        local delayTime = States.FastDigEnabled and math.max(0.01, States.FastDigDelay) or 0.1
-        task.wait(delayTime)
-    end
-end)
-
--- Auto Sell Remote Daemon & Full Inventory Detector (Req 12)
-task.spawn(function()
-    while true do
-        if SellRequest then
-            -- Regular passive auto sell
-            if States.AutoSellEnabled then
-                pcall(function() SellRequest:FireServer("all") end)
-            end
-
-            -- Auto Sell when inventory is full (Req 12)
-            if States.AutoSellWhenFull then
-                local curWeight, maxCapacity = CheckInventoryStatus()
-                if maxCapacity > 0 and curWeight >= maxCapacity then
-                    pcall(function()
-                        SellRequest:FireServer("all")
-                        Kavo:Notify("Inventory Full", "Auto-sold full inventory (" .. tostring(curWeight) .. "/" .. tostring(maxCapacity) .. ")", 3)
-                    end)
+        -- Farm Boulders
+        if CONFIG.FarmBoulders then
+            statusLabel.Text = "🪨 กำลังหา Boulder..."
+            statusLabel.TextColor3 = Color3.fromRGB(255, 170, 80)
+            for _, data in ipairs(allBoulders) do
+                if not _G.AutoFarmEnabled then break end
+                local boulder = data.Part
+                if boulder and boulder.Parent and boulder:IsDescendantOf(Workspace) then
+                    local tierName = CONFIG.TierNames[data.Tier] or "?"
+                    statusLabel.Text = "🪨 ขุด " .. boulder.Name .. " [" .. tierName .. "]"
+                    statusLabel.TextColor3 = CONFIG.TierColors[data.Tier] or Color3.new(1,1,1)
+                    if tweenToPart(boulder, CONFIG.BoulderOffset) then
+                        digBoulder(boulder)
+                        didSomething = true
+                        wait(0.2)
+                    end
                 end
             end
         end
-        task.wait(0.5)
-    end
-end)
 
--- Auto Drop Non-Rune Ores Daemon (Req 2)
-task.spawn(function()
-    while true do
-        if States.AutoDropExceptRunes then
-            pcall(DropAllOresExceptRunes)
+        if not didSomething then
+            statusLabel.Text = "⏳ รอ Target..."
+            statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+            wait(2)
         end
-        task.wait(1.5)
-    end
-end)
 
--- Stat Upgrade Daemon Thread
-task.spawn(function()
-    while true do
-        if UpgradeBuy then
-            if States.AutoAir1 then pcall(function() UpgradeBuy:FireServer("Air", 1) end) end
-            if States.AutoAir2 then pcall(function() UpgradeBuy:FireServer("Air", 2) end) end
-            if States.AutoAir3 then pcall(function() UpgradeBuy:FireServer("Air", 3) end) end
-            
-            if States.AutoWeight1 then pcall(function() UpgradeBuy:FireServer("Weight", 1) end) end
-            if States.AutoWeight2 then pcall(function() UpgradeBuy:FireServer("Weight", 2) end) end
-            if States.AutoWeight3 then pcall(function() UpgradeBuy:FireServer("Weight", 3) end) end
-        end
-        task.wait(0.3) 
-    end
-end)
-
--- Positional Tracker Frame UI update loop
-task.spawn(function()
-    while true do
-        local root = GetRoot()
-        if root then
-            local pos = root.Position
-            CurrentPosLabel:UpdateLabel(string.format("Current Location: X: %.1f, Y: %.1f, Z: %.1f", pos.X, pos.Y, pos.Z))
-        end
-        task.wait(0.2)
-    end
-end)
-
--- Core Physics & Locomotion Thread Hook (Req 8, 9)
-RunService.Heartbeat:Connect(function(deltaTime)
-    local root = GetRoot()
-    local hum = GetHumanoid()
-    if not root or not hum then return end
-
-    -- Noclip Loop
-    if States.NoclipEnabled and LP.Character then
-        for _, descendant in ipairs(LP.Character:GetChildren()) do
-            if descendant:IsA("BasePart") then descendant.CanCollide = false end
-        end
+        RunService.Heartbeat:Wait()
     end
 
-    -- Float Loop (Req 8)
-    if States.FloatEnabled and not States.FlyEnabled then
-        root.Velocity = Vector3.new(root.Velocity.X, 0, root.Velocity.Z)
-    end
+    statusLabel.Text = "⏹️ สถานะ: ปิดอยู่"
+    statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    isFarming = false
+end
 
-    -- Fly Loop (Req 8)
-    if States.FlyEnabled then
-        hum.PlatformStand = true
-        local flyDirection = Vector3.new(0, 0, 0)
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyDirection = flyDirection + Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyDirection = flyDirection - Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyDirection = flyDirection - Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyDirection = flyDirection + Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyDirection = flyDirection + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyDirection = flyDirection - Vector3.new(0, 1, 0) end
-        if flyDirection.Magnitude > 0 then
-            root.Velocity = flyDirection.Unit * States.FlySpeed
-        else
-            root.Velocity = Vector3.new(0, 0, 0)
+--// Toggle
+local function toggleFarm()
+    _G.AutoFarmEnabled = not _G.AutoFarmEnabled
+    if _G.AutoFarmEnabled then
+        if not isFarming then
+            isFarming = true
+            sessionStart = tick()
+            statusLabel.Text = "▶️ สถานะ: เริ่มทำงาน..."
+            statusLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+            if CONFIG.NotifyOnRejoin then
+                sendDiscord("🟢 **เริ่มฟาร์ม** บนเซิร์ฟเวอร์", 0x00FF00)
+            end
+            spawn(farmLoop)
         end
     else
-        -- Walkspeed Loop (Req 9)
-        if hum.PlatformStand and not States.FlyEnabled then hum.PlatformStand = false end
-        if States.SpeedEnabled then
-            local moveDirection = Vector3.new(0, 0, 0)
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - Camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + Camera.CFrame.RightVector end
-            moveDirection = Vector3.new(moveDirection.X, 0, moveDirection.Z)
-            if moveDirection.Magnitude > 0 then
-                root.CFrame = root.CFrame + (moveDirection.Unit * States.SpeedValue * deltaTime)
-            end
-        end
+        statusLabel.Text = "⏹️ กำลังปิด..."
+        saveData()
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == CONFIG.ToggleKey then
+        toggleFarm()
     end
 end)
+
+--// ปุ่มเปิด/ปิด บน UI (สำรอง)
+local toggleBtn = Instance.new("TextButton", mainFrame)
+toggleBtn.Size = UDim2.new(0.4, 0, 0, 26)
+toggleBtn.Position = UDim2.new(0.3, 0, 0, 52)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+toggleBtn.Text = "▶️ START"
+toggleBtn.TextColor3 = Color3.new(1,1,1)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 13
+toggleBtn.Visible = false
+
+print("========================================")
+print("🪨 Delta Boulder & Rune Farm v3.0")
+print("✅ โหลดสำเร็จ!")
+print("⌨️ กด RightShift เพื่อเปิด/ปิด")
+print("🔄 Auto Rejoin: " .. tostring(CONFIG.AutoRejoin))
+print("🛡️ Anti AFK: " .. tostring(CONFIG.AntiAFK))
+print("========================================")
